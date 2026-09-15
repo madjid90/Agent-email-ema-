@@ -32,8 +32,9 @@ export async function testComponent(name: ComponentName): Promise<ComponentStatu
     }
     case "whatsapp": {
       const s = getWhatsappStatus();
+      if (!s.configured) return { component: name, ok: false, configured: false, message: "WhatsApp non configuré (token, numéro, verify token, numéro autorisé)" };
       const r = await testWhatsappConnection();
-      return { component: name, ok: r.ok, configured: s.configured, message: r.message };
+      return { component: name, ok: r.ok, configured: true, message: r.message };
     }
     case "sqlite": {
       try {

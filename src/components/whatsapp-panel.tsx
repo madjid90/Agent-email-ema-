@@ -1,0 +1,64 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+export interface WhatsappPanelStatus {
+  configured: boolean;
+  tokenConfigured: boolean;
+  phoneNumberIdConfigured: boolean;
+  verifyTokenConfigured: boolean;
+  appSecretConfigured: boolean;
+  approverPhone: string | null;
+  approverConfigured: boolean;
+  lastTestAt: string | null;
+  lastTestResult: string | null;
+  webhookPath: string;
+}
+
+export function WhatsappPanel({ status, appUrl }: { status: WhatsappPanelStatus; appUrl: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
+
+  async function test() {
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch("/api/integrations/whatsapp/test", { method: "POST" });
+    const json = (await res.json()) as { ok: boolean; data?: { test: { ok: boolean; message: string } }; error?: { message: string } };
+    setBusy(false);
+    if (!json.ok) setMsg({ tone: "danger", text: json.error?.message ?? "Erreur" });
+    else setMsg({ tone: json.data?.test.ok ? "ok" : "danger", text: json.data?.test.message ?? "" });
+    router.refresh();
+  }
+
+  const missing = [
+    !status.tokenConfigured ? "WHATSAPP_ACCESS_TOKEN" : null,
+    !status.phoneNumberIdConfigured ? "WHATSAPP_PHONE_NUMBER_ID" : null,
+    !status.verifyTokenConfigured ? "WHATSAPP_VERIFY_TOKEN" : null,
+    !status.approverConfigured ? "WHATSAPP_APPROVER_PHONE" : null,
+  ].filter((v): v is string => v !== null);
+
+  return (
+    <div className="card">
+      <h3>WhatsApp Business Cloud API</h3>
+      {status.configured ? (
+        <div className="alert ok">
+          <strong>✅ Connecté</strong>
+          <div className="form-grid" style={{ marginTop: "0.5rem" }}>
+            <p><span className="muted">Numéro de validation :</span> {status.approverPhone}</p>
+            <p><span className="muted">Webhook :</span> <code>{appUrl}{status.webhookPath}</code></p>
+            <p><span className="muted">Signature des webhooks :</span> {status.appSecretConfigured ? "vérifiée (WHATSAPP_APP_SECRET)" : "non configurée — obligatoire en production"}</p>
+            <p><span className="muted">Dernier test :</span> {status.lastTestAt ? `${status.lastTestAt} (${status.lastTestResult})` : "—"}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="alert warn">Variables manquantes dans <code>.env</code> : {missing.map((m) => <code key={m} style={{ marginRight: "0.4rem" }}>{m}</code>)}. Seul le numéro autorisé peut valider les actions.</div>
+      )}
+      {msg ? <div className={`alert ${msg.tone}`}>{msg.text}</div> : null}
+      <div className="row">
+        <button className="btn primary" disabled={busy || !status.configured} onClick={() => void test()}>{busy ? "Envoi…" : "Test notification"}</button>
+      </div>
+    </div>
+  );
+}

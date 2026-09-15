@@ -54,6 +54,7 @@ const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   CONTEXT: { label: "Contexte", tone: "" },
   PENDING: { label: "En attente", tone: "warn" },
   EXPIRED: { label: "Expirée", tone: "" },
+  MODIFIED: { label: "Modifiée", tone: "primary" },
 };
 export function StatusBadge({ status }: { status: string }) {
   const s = STATUS_LABEL[status] ?? { label: status, tone: "" };

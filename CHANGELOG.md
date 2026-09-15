@@ -2,6 +2,25 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [0.4.0] — Phase 3 — WhatsApp / validation / exécution — 2026-09-15
+
+### Ajouté
+- Intégration WhatsApp Business Cloud API : `client.ts` (envoi, retries bornés, `WhatsappError`), `messages.ts` (message de validation compact + boutons interactifs), `webhook.ts` (vérification d'abonnement, signature HMAC, parsing zod, identifiants de boutons), `approvals.ts` (notification unique par approval, relance, traitement des décisions via l'Action Engine, dédoublonnage).
+- Routes `GET/POST /api/integrations/whatsapp/webhook`, `GET /api/integrations/whatsapp/status`, `POST /api/integrations/whatsapp/test` (message réel « ✅ EMA est correctement connecté à WhatsApp. »).
+- Routes actions : `PUT /api/actions/{id}/payload` (brouillon modifié manuellement), `POST /api/actions/{id}/notify` (renvoyer la demande), `POST /api/actions/{id}/retry` (nouvelle tentative après échec).
+- Action Engine : `createApprovalRequest()`, `editActionPayload()`, `retryAction()` ; l'expiration laisse l'action en attente (jamais exécutée sans décision).
+- Analyse → action `reply_email` en `WAITING_APPROVAL` + demande WhatsApp ; réanalyse met à jour la réponse en attente sans doublon.
+- Worker : tâche `notify_approvals` (demandes jamais parties, 5 tentatives max).
+- Interface : composant `ApprovalCard` (Modifier / Valider et envoyer / Refuser / Renvoyer la demande / Réessayer l'envoi, statuts), page À valider branchée (décisions récentes incluses), panneau WhatsApp dans Setup et Paramètres.
+- Migration `004_whatsapp` (`approvals.notify_attempts/sent_at/last_notify_error`, table `webhook_events`).
+- Variables `WHATSAPP_APPROVER_PHONE` (alias de `WHATSAPP_RECIPIENT_NUMBER`), `WHATSAPP_APP_SECRET`, `WHATSAPP_API_VERSION`.
+- `docs/whatsapp.md`, 18 nouveaux tests (WhatsApp et Graph mockés, aucun message ni email réel).
+
+### Modifié
+- `expireApprovals` ne rejette plus l'action : approval `EXPIRED`, action `WAITING_APPROVAL`, renvoi possible.
+- Composant `action-buttons.tsx` remplacé par `approval-card.tsx`.
+- `SECURITY.md`, `ARCHITECTURE.md`, `CLAUDE.md` §9, `docs/deployment.md`.
+
 ## [0.3.0] — Phase 2 — Claude / compréhension des emails — 2026-09-15
 
 ### Ajouté

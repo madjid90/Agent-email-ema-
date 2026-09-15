@@ -39,7 +39,7 @@ Renseigner :
 
 - `ANTHROPIC_API_KEY`
 - `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID`, `MICROSOFT_REDIRECT_URI=https://ema.client.fr/api/integrations/microsoft/callback`
-- `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_RECIPIENT_NUMBER`
+- `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_APPROVER_PHONE`
 - `APP_URL=https://ema.client.fr`
 - `APP_SECRET` : `openssl rand -hex 32`
 - `APP_PASSWORD` : mot de passe d'accès à l'interface
@@ -55,8 +55,9 @@ Les fichiers `config/*.json` sont créés au premier lancement à partir des `*.
 
 ### WhatsApp Business Cloud API
 
-1. Meta for Developers → app → WhatsApp → API setup : `Phone number ID`, `Access token` (permanent via System User).
-2. Webhook : URL `https://ema.client.fr/api/whatsapp/webhook`, verify token = `WHATSAPP_VERIFY_TOKEN`, abonnement au champ `messages`.
+1. Meta for Developers → app → WhatsApp → API setup : `Phone number ID`, `Access token` (permanent via System User), `App secret` (Paramètres de base) → `WHATSAPP_APP_SECRET`.
+2. Webhook : URL `https://ema.client.fr/api/integrations/whatsapp/webhook`, verify token = `WHATSAPP_VERIFY_TOKEN`, abonnement au champ `messages`.
+3. `WHATSAPP_APPROVER_PHONE` = numéro de l'utilisateur (chiffres, ex. `33612345678`) : seul numéro autorisé à valider. Vérifier avec « Test notification » dans `/setup`. Détails : `docs/whatsapp.md`.
 
 ## 4. Base de données et build
 

@@ -45,13 +45,21 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Chat EMA lecture seule (Claude + outils de lecture, boucle bornée)
 - ✅ Migration `003_analysis`, 28 nouveaux tests (Anthropic mocké, injection testée), `docs/analysis.md`
 
-## PHASE 3 — WhatsApp + validation ⏳
+## PHASE 3 — WhatsApp + validation ✅
 
-- Envoi de messages interactifs (VALIDER / REFUSER / MODIFIER)
-- Webhook (vérification, signature, idempotence)
-- Exécution après validation, expiration
-- Page À valider synchronisée
-- **Scénario n°1 complet et fiable** : email reçu → analyse → réponse proposée → WhatsApp → validation → réponse dans Outlook
+- ✅ Client WhatsApp Business Cloud API centralisé (`src/integrations/whatsapp/client.ts`) : token jamais exposé, retries bornés 429/5xx, erreurs Meta explicites
+- ✅ Message de validation compact avec boutons interactifs ✅ Valider / ❌ Refuser (`approve:<approval_id>` / `reject:<approval_id>`), texte long séparé si nécessaire
+- ✅ Webhook `/api/integrations/whatsapp/webhook` : vérification `hub.verify_token`, signature `X-Hub-Signature-256` (obligatoire en production), JSON validé, dédoublonnage `webhook_events`
+- ✅ Numéro autorisé `WHATSAPP_APPROVER_PHONE` : seul décideur, tout autre numéro ignoré
+- ✅ Approvals réutilisées (usage unique, expiration, une seule notification active, renvoi après expiration, relance par le worker si WhatsApp indisponible)
+- ✅ Analyse → action `reply_email` en `WAITING_APPROVAL` (jamais exécutée sans validation), réanalyse sans doublon
+- ✅ Valider → Action Engine (`APPROVED → EXECUTING` atomique) → exécuteur Outlook → réponse réelle dans le thread → `COMPLETED` ; Refuser → `REJECTED`, aucun envoi
+- ✅ Échec Graph après validation → `FAILED`, email non considéré envoyé, « Réessayer l'envoi »
+- ✅ Page À valider : expéditeur, objet, résumé, société, confiance, brouillon éditable (Modifier), Valider et envoyer, Refuser, Renvoyer la demande, statuts En attente / Validé / Envoyé / Refusé / Expiré / Échec
+- ✅ Setup / Paramètres : panneau WhatsApp (connecté, numéro masqué, webhook, Test notification réel)
+- ✅ Historique complet (analyse, brouillon, action, demande envoyée, décision, exécution, erreurs)
+- ✅ 18 nouveaux tests (WhatsApp et Graph mockés : double clic, rejeu, UI + WhatsApp simultanés, Graph en échec, brouillon modifié, mauvais numéro, expiration…), `docs/whatsapp.md`
+- ✅ **Scénario n°1 complet** : email → sync → analyse → brouillon → WhatsApp → validation → réponse Outlook → historique (validé avec Graph et WhatsApp simulés ; test réel à faire avec les credentials du client)
 
 ## PHASE 4 — Factures + paiements ⏳
 

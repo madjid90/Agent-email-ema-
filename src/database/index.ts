@@ -13,3 +13,4 @@ export * as kv from "./repositories/kv";
 export * as locks from "./repositories/locks";
 export * as chat from "./repositories/chat";
 export * as llmRuns from "./repositories/llm-runs";
+export * as webhookEvents from "./repositories/webhook-events";

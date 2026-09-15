@@ -38,8 +38,28 @@ export function getPendingApprovalForAction(actionId: string, db: Db = getDb()):
     .get(actionId) as ApprovalRow | undefined;
 }
 
-export function setApprovalExternalId(id: string, externalMessageId: string, db: Db = getDb()): void {
-  db.prepare("UPDATE approvals SET external_message_id = ? WHERE id = ?").run(externalMessageId, id);
+/** Notification envoyée : identifiant Meta + date. Une seule notification active par approval. */
+export function markApprovalSent(id: string, externalMessageId: string, db: Db = getDb()): void {
+  db.prepare("UPDATE approvals SET external_message_id = ?, sent_at = ?, last_notify_error = NULL, notify_attempts = notify_attempts + 1 WHERE id = ?").run(externalMessageId, nowIso(), id);
+}
+
+export function markApprovalNotifyFailed(id: string, error: string, db: Db = getDb()): void {
+  db.prepare("UPDATE approvals SET notify_attempts = notify_attempts + 1, last_notify_error = ? WHERE id = ?").run(error.slice(0, 300), id);
+}
+
+export function updateApprovalProposedReply(id: string, proposedReply: string | null, db: Db = getDb()): void {
+  db.prepare("UPDATE approvals SET proposed_reply = ? WHERE id = ?").run(proposedReply, id);
+}
+
+/** Validations en attente jamais notifiées (ou en échec), bornées en tentatives. */
+export function listPendingUnsentApprovals(maxAttempts: number, db: Db = getDb()): ApprovalRow[] {
+  return db
+    .prepare("SELECT * FROM approvals WHERE status = 'PENDING' AND external_message_id IS NULL AND notify_attempts < ? ORDER BY created_at ASC")
+    .all(maxAttempts) as ApprovalRow[];
+}
+
+export function getLatestApprovalForAction(actionId: string, db: Db = getDb()): ApprovalRow | undefined {
+  return db.prepare("SELECT * FROM approvals WHERE action_id = ? ORDER BY created_at DESC LIMIT 1").get(actionId) as ApprovalRow | undefined;
 }
 
 /** Décision à usage unique : ne change que si encore PENDING. */

@@ -120,6 +120,19 @@ export interface ApprovalRow {
   comment: string | null;
   expires_at: string;
   created_at: string;
+  notify_attempts: number;
+  sent_at: string | null;
+  last_notify_error: string | null;
+}
+
+export interface WebhookEventRow {
+  id: string;
+  provider: string;
+  external_id: string;
+  event_type: string;
+  sender: string | null;
+  received_at: string;
+  result: string | null;
 }
 
 export type FollowupStatus = "SCHEDULED" | "CHECKING" | "WAITING_APPROVAL" | "COMPLETED" | "CANCELLED" | "FAILED";

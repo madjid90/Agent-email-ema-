@@ -113,7 +113,8 @@ describe("Action Engine", () => {
     db.prepare("UPDATE approvals SET expires_at = '2000-01-01T00:00:00.000Z' WHERE action_id = ?").run(a.id);
     expect(expireApprovals({ db, settings: settings() })).toBe(1);
     expect(approvals.listPendingApprovals(db)).toHaveLength(0);
-    expect(db.prepare("SELECT status FROM actions WHERE id = ?").get(a.id)).toEqual({ status: "REJECTED" });
+    // L'action reste en attente : jamais exécutée sans décision, renvoi ou refus possible
+    expect(db.prepare("SELECT status FROM actions WHERE id = ?").get(a.id)).toEqual({ status: "WAITING_APPROVAL" });
     expect(expireApprovals({ db, settings: settings() })).toBe(0);
   });
 

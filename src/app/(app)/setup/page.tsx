@@ -25,6 +25,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
         outlook={getOutlookStatus()}
         notice={notice}
         whatsapp={getWhatsappStatus()}
+        appUrl={env.APP_URL}
         model={env.ANTHROPIC_MODEL}
         completedSteps={kvGetJson<string[]>("setup.completed_steps", [])}
       />

@@ -12,6 +12,7 @@ import { clearExecutors } from "@/actions/engine";
 import { settingsSchema, type Company, type Rule } from "@/lib/config";
 import { UNTRUSTED_TAG } from "@/security/untrusted";
 import { fakeAnthropic, analysisFixture, apiError, timeoutError } from "./helpers/fake-anthropic";
+import { fakeWhatsapp } from "./helpers/fake-whatsapp";
 
 const settings = settingsSchema.parse({ company: { name: "Mon Entreprise", userName: "Madjid", email: "moi@entreprise.fr" }, agent: { signatureText: "Cordialement,\nMadjid" } });
 const companies: Company[] = [
@@ -26,7 +27,7 @@ const rules: Rule[] = [
 const contacts = [{ id: "nabila", name: "Nabila", email: "nabila@exemple.fr", role: "Comptabilité", internal: true }];
 
 function base(db: Db) {
-  return { db, settings, companies, rules, contacts };
+  return { db, settings, companies, rules, contacts, whatsapp: { db, settings, client: fakeWhatsapp().client, approverPhone: "33612345678" } };
 }
 
 function newEmail(db: Db, overrides: Partial<Parameters<typeof emails.insertEmail>[0]> = {}) {
@@ -42,27 +43,31 @@ describe("Analyse d'un email par Claude (mocké)", () => {
   });
   afterEach(() => clearExecutors());
 
-  it("email simple nécessitant une réponse : analyse persistée, brouillon, action prepare_reply sans envoi", async () => {
+  it("email simple nécessitant une réponse : analyse persistée, action reply_email en attente de validation, demande WhatsApp, aucun envoi", async () => {
     const e = newEmail(db);
     const { client, calls } = fakeAnthropic([{ output: analysisFixture() }]);
-    const r = await analyzeEmail(e.id, { ...base(db), client });
+    const wa = fakeWhatsapp();
+    const r = await analyzeEmail(e.id, { ...base(db), client, whatsapp: { db, settings, client: wa.client, approverPhone: "33612345678" } });
     expect(r.reused).toBe(false);
     expect(r.analysis.category).toBe("ADMIN_REQUEST");
     expect(r.analysis.needs_reply).toBe(1);
     expect(r.analysis.reply_draft).toContain("attestation");
     expect(r.analysis.requires_human_review).toBe(0);
-    expect(emails.getEmail(e.id, db)?.status).toBe("ANALYZED");
+    expect(emails.getEmail(e.id, db)?.status).toBe("ACTION_PROPOSED");
     // Requête : système + contexte, email encapsulé, pas de clé
     const params = calls[0]?.params as { system: { text: string }[]; messages: { content: string }[]; output_config: { format: unknown; effort: string } };
     expect(params.system[0]?.text).toContain("EMA");
     expect(params.messages[0]?.content).toContain(`<${UNTRUSTED_TAG} source="email"`);
     expect(params.messages[0]?.content).toContain("- alpha : Alpha SAS");
     expect(params.output_config.format).toBeDefined();
-    // Action : prepare_reply LOW auto-approuvée et terminée, aucune action d'envoi
+    // Action : reply_email en attente de validation, jamais exécutée ici ; demande WhatsApp envoyée une fois
     const acts = actions.listActionsForEmail(e.id, db);
     expect(acts).toHaveLength(1);
-    expect(acts[0]?.type).toBe("prepare_reply");
-    expect(acts[0]?.status).toBe("COMPLETED");
+    expect(acts[0]?.type).toBe("reply_email");
+    expect(acts[0]?.status).toBe("WAITING_APPROVAL");
+    expect(JSON.parse(acts[0]!.payload).body).toContain("attestation");
+    expect(wa.sent()).toHaveLength(1);
+    expect(r.actionIds).toEqual([acts[0]?.id]);
     // Journal LLM sans contenu
     const runs = listLlmRuns({ emailId: e.id }, db);
     expect(runs[0]?.status).toBe("ok");
@@ -185,7 +190,7 @@ describe("Analyse d'un email par Claude (mocké)", () => {
     await expect(analyzeEmail(e.id, { ...base(db), client })).rejects.toMatchObject({ kind: "rate_limit", retryable: true });
     const r = await analyzeEmail(e.id, { ...base(db), client, force: true, actor: "user" });
     expect(r.analysis.category).toBe("ADMIN_REQUEST");
-    expect(emails.getEmail(e.id, db)?.status).toBe("ANALYZED");
+    expect(emails.getEmail(e.id, db)?.status).toBe("ACTION_PROPOSED");
     expect(listLlmRuns({ emailId: e.id }, db).map((r) => r.status)).toEqual(["ok", "error", "error"]);
   });
 
@@ -206,15 +211,21 @@ describe("Analyse d'un email par Claude (mocké)", () => {
     expect(analyses.listAnalysesForEmail(e.id, db)).toHaveLength(1);
   });
 
-  it("réanalyse manuelle : nouvelle analyse, historique conservé", async () => {
+  it("réanalyse manuelle : nouvelle analyse, historique conservé, réponse en attente mise à jour sans doublon", async () => {
     const e = newEmail(db);
-    const { client, calls } = fakeAnthropic([{ output: analysisFixture() }, { output: analysisFixture({ category: "URGENT", urgency: "HIGH" }) }]);
-    await analyzeEmail(e.id, { ...base(db), client });
-    const r = await analyzeEmail(e.id, { ...base(db), client, force: true, actor: "user" });
+    const { client, calls } = fakeAnthropic([{ output: analysisFixture() }, { output: analysisFixture({ category: "URGENT", urgency: "HIGH", reply_draft: "Nouveau brouillon" }) }]);
+    const wa = fakeWhatsapp();
+    const deps = { ...base(db), client, whatsapp: { db, settings, client: wa.client, approverPhone: "33612345678" } };
+    await analyzeEmail(e.id, deps);
+    const r = await analyzeEmail(e.id, { ...deps, force: true, actor: "user" });
     expect(calls).toHaveLength(2);
     expect(r.analysis.category).toBe("URGENT");
     expect(analyses.listAnalysesForEmail(e.id, db)).toHaveLength(2);
     expect(analyses.getLatestAnalysis(e.id, db)?.category).toBe("URGENT");
+    const acts = actions.listActionsForEmail(e.id, db);
+    expect(acts).toHaveLength(1);
+    expect(JSON.parse(acts[0]!.payload).body).toBe("Nouveau brouillon");
+    expect(wa.sent()).toHaveLength(1); // une seule demande WhatsApp
   });
 
   it("un message CONTEXT ou sortant n'est jamais analysé", async () => {
@@ -241,7 +252,7 @@ describe("Analyse d'un email par Claude (mocké)", () => {
     expect(r.succeeded).toBe(1);
     expect(r.failed).toBe(1);
     expect(calls).toHaveLength(2);
-    expect(emails.getEmail(a.id, db)?.status).toBe("ANALYZED");
+    expect(emails.getEmail(a.id, db)?.status).toBe("ACTION_PROPOSED");
     expect(emails.getEmail(b.id, db)?.status).toBe("ANALYSIS_FAILED");
     expect(emails.getEmail(c.id, db)?.status).toBe("ANALYSIS_FAILED");
     expect(emails.getEmail(stuck.id, db)?.status).toBe("ANALYSIS_FAILED");

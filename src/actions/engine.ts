@@ -4,7 +4,7 @@ import { getDb } from "@/database/connection";
 import * as actionsRepo from "@/database/repositories/actions";
 import * as approvalsRepo from "@/database/repositories/approvals";
 import { logHistory } from "@/database/repositories/history";
-import type { ActionRow, ActionStatus } from "@/database/types";
+import type { ActionRow, ActionStatus, ApprovalRow } from "@/database/types";
 import { parseJson } from "@/database/types";
 import { EmaError } from "@/lib/errors";
 import { nowIso, addHoursSafe } from "./time";
@@ -128,18 +128,70 @@ export function rejectAction(actionId: string, decidedBy: string, reason?: strin
   return actionsRepo.getAction(actionId, db) as ActionRow;
 }
 
-/** Expire les validations en attente échues → actions REJECTED. */
+/**
+ * Expire les validations en attente échues → approval EXPIRED. L'action reste
+ * WAITING_APPROVAL (jamais exécutée sans décision) : l'utilisateur peut la
+ * refuser, la valider depuis l'interface ou renvoyer une demande.
+ */
 export function expireApprovals(opts: EngineOptions = {}): number {
   const { db } = resolve(opts);
   let n = 0;
   for (const apr of approvalsRepo.listExpiredPendingApprovals(nowIso(), db)) {
     if (approvalsRepo.decideApproval(apr.id, "EXPIRED", "system", "Délai de validation dépassé", db)) {
-      actionsRepo.transitionAction(apr.action_id, ["WAITING_APPROVAL", "PROPOSED"], "REJECTED", { completed_at: nowIso(), error: "Validation expirée" }, db);
-      logHistory({ eventType: "approval.expired", message: "Validation expirée, action annulée", actor: "system", actionId: apr.action_id, approvalId: apr.id }, db);
+      logHistory({ eventType: "approval.expired", message: "Demande de validation expirée (action toujours en attente, non exécutée)", actor: "system", actionId: apr.action_id, approvalId: apr.id }, db);
       n++;
     }
   }
   return n;
+}
+
+/**
+ * Nouvelle demande de validation pour une action toujours en attente
+ * (après expiration ou échec d'envoi). Refuse s'il existe déjà une demande PENDING.
+ */
+export function createApprovalRequest(actionId: string, opts: EngineOptions = {}): ApprovalRow {
+  const { db, settings } = resolve(opts);
+  const action = requireAction(actionId, db);
+  if (action.status !== "WAITING_APPROVAL" && action.status !== "PROPOSED") throw new EmaError("INVALID_TRANSITION", `Action ${actionId} en statut ${action.status} : aucune validation à demander`);
+  const pending = approvalsRepo.getPendingApprovalForAction(actionId, db);
+  if (pending) return pending;
+  const type = actionTypeSchema.parse(action.type);
+  const approval = approvalsRepo.insertApproval(
+    { actionId, channel: settings.approvals.channel, summary: action.title, proposedReply: extractProposedReply(type, parseJson(action.payload, {})), expiresAt: addHoursSafe(nowIso(), settings.approvals.expireAfterHours) },
+    db,
+  );
+  logHistory({ eventType: "approval.requested", message: "Nouvelle demande de validation créée", actor: "user", actionId, emailId: action.source_email_id, approvalId: approval.id }, db);
+  return approval;
+}
+
+/**
+ * Modification manuelle du payload d'une action en attente (ex. brouillon
+ * édité dans l'interface). Le texte modifié devient le payload définitif.
+ */
+export function editActionPayload(actionId: string, patch: Record<string, unknown>, actor: "user" | "ema" = "user", opts: EngineOptions = {}): ActionRow {
+  const { db } = resolve(opts);
+  const action = requireAction(actionId, db);
+  if (action.status !== "WAITING_APPROVAL" && action.status !== "PROPOSED") throw new EmaError("INVALID_TRANSITION", `Action ${actionId} en statut ${action.status} : modification impossible`);
+  const type = actionTypeSchema.parse(action.type);
+  const merged = { ...parseJson<Record<string, unknown>>(action.payload, {}), ...patch };
+  const parsed = (ACTION_PAYLOAD_SCHEMAS[type] as z.ZodTypeAny).safeParse(merged);
+  if (!parsed.success) throw new EmaError("VALIDATION", "Payload modifié invalide", { details: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) });
+  actionsRepo.updateActionPayload(actionId, parsed.data, db);
+  const pending = approvalsRepo.getPendingApprovalForAction(actionId, db);
+  if (pending) approvalsRepo.updateApprovalProposedReply(pending.id, extractProposedReply(type, parsed.data), db);
+  logHistory({ eventType: "action.payload_edited", message: `Brouillon modifié manuellement (${Object.keys(patch).join(", ")})`, actor, actionId, emailId: action.source_email_id, approvalId: pending?.id ?? null }, db);
+  return actionsRepo.getAction(actionId, db) as ActionRow;
+}
+
+/** Nouvelle tentative explicite d'une action FAILED (déjà validée). */
+export async function retryAction(actionId: string, actor: string, opts: EngineOptions = {}): Promise<ActionRow> {
+  const { db } = resolve(opts);
+  const action = requireAction(actionId, db);
+  if (!actionsRepo.transitionAction(actionId, "FAILED", "APPROVED", { error: null, completed_at: null }, db)) {
+    throw new EmaError("INVALID_TRANSITION", `Action ${actionId} en statut ${action.status} : nouvelle tentative impossible`);
+  }
+  logHistory({ eventType: "action.retry", message: `Nouvelle tentative demandée (${actor})`, actor: "user", actionId, emailId: action.source_email_id }, db);
+  return executeAction(actionId, opts);
 }
 
 /* Exécution (idempotente) ------------------------------------------------ */

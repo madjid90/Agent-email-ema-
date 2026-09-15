@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { defineTool } from "../types";
-import { NotImplementedError } from "@/lib/errors";
+import { getApproverPhone } from "@/lib/env";
+import { EmaError } from "@/lib/errors";
+import { getWhatsappClient, isWhatsappConfigured } from "@/integrations/whatsapp/client";
+import { textMessage } from "@/integrations/whatsapp/messages";
 
-/** Envoi d'une notification WhatsApp libre (interne, jamais exposé à Claude). */
+/** Notification texte libre au numéro autorisé (interne, jamais exposé à Claude). */
 export const sendWhatsappNotification = defineTool({
   name: "send_whatsapp_notification",
   description: "Interne : envoie une notification texte sur WhatsApp à l'utilisateur.",
@@ -10,8 +13,11 @@ export const sendWhatsappNotification = defineTool({
   modes: ["internal"],
   input: z.object({ text: z.string().min(1).max(4000) }),
   output: z.object({ message_id: z.string() }),
-  handler: async () => {
-    throw new NotImplementedError("send_whatsapp_notification", "phase 3");
+  handler: async (input) => {
+    const to = getApproverPhone();
+    if (!isWhatsappConfigured() || !to) throw new EmaError("CONFIG", "WhatsApp non configuré");
+    const r = await getWhatsappClient().send(textMessage(to, input.text));
+    return { message_id: r.messageId };
   },
 });
 

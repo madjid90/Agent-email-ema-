@@ -7,7 +7,9 @@ import { getCompanies, getContacts, getRules, getSettings, type Company, type Co
 import { EmaError } from "@/lib/errors";
 import { createLogger } from "@/lib/logger";
 import { runStructured, LlmError, type StructuredClient } from "@/integrations/anthropic/structured";
-import { proposeAction, executeAction } from "@/actions/engine";
+import { proposeAction, editActionPayload } from "@/actions/engine";
+import * as actionsRepo from "@/database/repositories/actions";
+import { notifyPendingApproval, type ApprovalDeps } from "@/integrations/whatsapp/approvals";
 import { emailAnalysisSchema, type EmailAnalysis } from "./schemas";
 import { buildEmailContext, renderTrustedContext, renderUntrustedContext, type ContextDeps } from "./context";
 import { getPrompt, getSystemPrompt } from "./prompts";
@@ -24,6 +26,8 @@ export interface AnalyzeDeps extends ContextDeps {
   /** Réanalyse explicite depuis l'interface. */
   force?: boolean;
   actor?: "worker" | "user";
+  /** Dépendances WhatsApp (tests). */
+  whatsapp?: ApprovalDeps;
 }
 
 export interface AnalyzeResult {
@@ -42,8 +46,10 @@ export function prepareAnalysisRequest(emailId: string, deps: ContextDeps = {}):
 
 /**
  * Analyse un email : contexte borné → Claude (sortie structurée) → garde-fous →
- * règles métier → email_analyses → statut. Aucun email n'est envoyé ici :
- * seule une action `prepare_reply` (LOW, sans effet) matérialise le brouillon.
+ * règles métier → email_analyses → statut. Aucun email n'est envoyé ici : si une
+ * réponse est attendue, une action `reply_email` est créée en WAITING_APPROVAL
+ * et la demande de validation part sur WhatsApp. L'envoi n'a lieu qu'après
+ * validation, via l'Action Engine.
  */
 export async function analyzeEmail(emailId: string, deps: AnalyzeDeps = {}): Promise<AnalyzeResult> {
   const db = deps.db ?? getDb();
@@ -96,12 +102,31 @@ export async function analyzeEmail(emailId: string, deps: AnalyzeDeps = {}): Pro
 
     const actionIds: string[] = [];
     if (analysis.needs_reply && analysis.reply_draft) {
+      // Réanalyse : une réponse déjà en attente est mise à jour, jamais dupliquée (une seule demande active).
+      const existing = actionsRepo.listActionsForEmail(email.id, db).find((a) => a.type === "reply_email" && (a.status === "WAITING_APPROVAL" || a.status === "PROPOSED"));
+      if (existing) {
+        editActionPayload(existing.id, { body: analysis.reply_draft }, "ema", { db, settings });
+        emailsRepo.transitionEmailStatus(email.id, ["ANALYZED"], "ACTION_PROPOSED", db);
+        actionIds.push(existing.id);
+        return { analysis: row, reused: false, rules: outcome, actionIds };
+      }
+      // Toujours soumise à validation (phase 3) : jamais exécutée immédiatement.
       const action = proposeAction(
-        { type: "prepare_reply", title: `Réponse préparée pour ${email.sender_name ?? email.sender_email ?? "?"} — ${email.subject}`, payload: { email_id: email.id, body: analysis.reply_draft }, sourceEmailId: email.id, actor: "ema" },
+        {
+          type: "reply_email",
+          title: `Répondre à ${email.sender_name ?? email.sender_email ?? "?"} — ${email.subject}`,
+          payload: { email_id: email.id, body: analysis.reply_draft, reply_all: false, attachments: [] },
+          sourceEmailId: email.id,
+          companyId: analysis.company_id,
+          requiresApproval: true,
+          actor: "ema",
+        },
         { db, settings },
       );
-      await executeAction(action.id, { db, settings });
+      emailsRepo.transitionEmailStatus(email.id, ["ANALYZED"], "ACTION_PROPOSED", db);
+      logHistory({ eventType: "action.draft_created", message: "Brouillon de réponse prêt, en attente de validation", actor, actionId: action.id, emailId: email.id }, db);
       actionIds.push(action.id);
+      await notifyPendingApproval(action.id, { db, settings, ...deps.whatsapp });
     }
     return { analysis: row, reused: false, rules: outcome, actionIds };
   } catch (err) {

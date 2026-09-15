@@ -7,6 +7,7 @@ import { SettingsForm } from "./settings-form";
 import { RulesEditor } from "./rules-editor";
 import { CompaniesEditor } from "./companies-editor";
 import { OutlookPanel, type OutlookPanelStatus } from "./outlook-panel";
+import { WhatsappPanel, type WhatsappPanelStatus } from "./whatsapp-panel";
 
 const STEPS = [
   { id: "company", label: "1. Entreprise" },
@@ -31,7 +32,8 @@ interface Props {
   integrations: { anthropic: boolean; microsoft: boolean; whatsapp: boolean; appSecret: boolean; appPassword: boolean };
   outlook: OutlookPanelStatus;
   notice?: { tone: "ok" | "danger"; text: string } | null;
-  whatsapp: { configured: boolean; recipientConfigured: boolean };
+  whatsapp: WhatsappPanelStatus;
+  appUrl: string;
   model: string;
   completedSteps: string[];
 }
@@ -112,13 +114,13 @@ export function SetupWizard(p: Props) {
       ) : null}
 
       {step === "whatsapp" ? (
-        <div className="card">
-          <h3>WhatsApp Business Cloud API</h3>
-          <p>Variables requises dans <code>.env</code> : <code>WHATSAPP_ACCESS_TOKEN</code>, <code>WHATSAPP_PHONE_NUMBER_ID</code>, <code>WHATSAPP_VERIFY_TOKEN</code>, <code>WHATSAPP_RECIPIENT_NUMBER</code>.</p>
-          <div className={`alert ${p.whatsapp.configured && p.whatsapp.recipientConfigured ? "ok" : "warn"}`}>{p.whatsapp.configured ? (p.whatsapp.recipientConfigured ? "Configuration détectée." : "Numéro destinataire manquant.") : "Configuration absente."}</div>
-          <table><tbody>{testRow("whatsapp")}</tbody></table>
+        <>
+          <WhatsappPanel status={p.whatsapp} appUrl={p.appUrl} />
+          <div className="card">
+            <p className="muted">Côté Meta : abonner le webhook <code>{p.appUrl}{p.whatsapp.webhookPath}</code> au champ <code>messages</code> avec le verify token, et renseigner <code>WHATSAPP_APP_SECRET</code> pour vérifier la signature des événements. Le message de validation propose les boutons ✅ Valider / ❌ Refuser ; seul le numéro autorisé est pris en compte.</p>
+          </div>
           {navButtons()}
-        </div>
+        </>
       ) : null}
 
       {step === "rules" ? (<><RulesEditor initial={p.rules} contacts={p.contacts} />{navButtons()}</>) : null}

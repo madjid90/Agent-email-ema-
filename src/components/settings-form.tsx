@@ -40,7 +40,7 @@ export function SettingsForm({ initial, onSaved, compact }: { initial: Settings;
             <div className="field"><label>Signature des emails</label><textarea value={s.agent.signatureText} onChange={(e) => setS({ ...s, agent: { ...s.agent, signatureText: e.target.value } })} /></div>
             <div>
               <div className="field"><label>Délai de relance par défaut (jours)</label><input type="number" min={1} max={60} value={s.agent.defaultFollowupDelayDays} onChange={(e) => setS({ ...s, agent: { ...s.agent, defaultFollowupDelayDays: Number(e.target.value) } })} /></div>
-              <div className="field"><label className="row"><input type="checkbox" checked={s.agent.autoReplyEnabled} onChange={(e) => setS({ ...s, agent: { ...s.agent, autoReplyEnabled: e.target.checked } })} style={{ width: "auto" }} /> Envoyer les réponses simples sans validation (déconseillé)</label></div>
+              <div className="field"><label className="row"><input type="checkbox" checked={s.agent.autoReplyEnabled} onChange={(e) => setS({ ...s, agent: { ...s.agent, autoReplyEnabled: e.target.checked } })} style={{ width: "auto" }} /> Envoyer les réponses simples sans validation (déconseillé — sans effet en phase 3 : toute réponse est validée)</label></div>
             </div>
           </div>
           <h3 style={{ marginTop: "1rem" }}>Validations</h3>

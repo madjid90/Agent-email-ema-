@@ -22,7 +22,11 @@ const envSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: optionalString,
   WHATSAPP_VERIFY_TOKEN: optionalString,
   WHATSAPP_APP_SECRET: optionalString,
+  /** Numéro autorisé à valider (format international, chiffres uniquement). */
+  WHATSAPP_APPROVER_PHONE: optionalString,
+  /** Ancien nom (phase 0), accepté comme alias de WHATSAPP_APPROVER_PHONE. */
   WHATSAPP_RECIPIENT_NUMBER: optionalString,
+  WHATSAPP_API_VERSION: z.string().trim().default("v21.0"),
 
   APP_URL: z.string().trim().default("http://localhost:3000"),
   APP_SECRET: optionalString,
@@ -60,6 +64,15 @@ export function resetEnvCache(): void {
   cached = null;
 }
 
+/** Numéro autorisé à valider, normalisé en chiffres (ex. 33612345678), ou null. */
+export function getApproverPhone(): string | null {
+  const env = getEnv();
+  const raw = env.WHATSAPP_APPROVER_PHONE ?? env.WHATSAPP_RECIPIENT_NUMBER;
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
+  return digits.length >= 8 ? digits : null;
+}
+
 /** Indique quelles intégrations sont configurées, sans exposer les valeurs. */
 export function getConfiguredIntegrations(): {
   anthropic: boolean;
@@ -72,7 +85,7 @@ export function getConfiguredIntegrations(): {
   return {
     anthropic: Boolean(env.ANTHROPIC_API_KEY),
     microsoft: Boolean(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET && env.MICROSOFT_REDIRECT_URI),
-    whatsapp: Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_VERIFY_TOKEN),
+    whatsapp: Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_VERIFY_TOKEN && getApproverPhone()),
     appSecret: Boolean(env.APP_SECRET && env.APP_SECRET.length >= 32),
     appPassword: Boolean(env.APP_PASSWORD),
   };

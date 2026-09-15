@@ -3,6 +3,7 @@ import { listDueFollowups } from "@/database/repositories/followups";
 import { kvSet } from "@/database/repositories/kv";
 import { createConnectedGraphClient, isOutlookConnected, syncInbox } from "@/integrations/microsoft";
 import { analyzePendingEmails } from "@/agent/orchestrator";
+import { notifyUnsentApprovals, isWhatsappConfigured } from "@/integrations/whatsapp";
 import { getConfiguredIntegrations } from "@/lib/env";
 import { nowIso } from "@/lib/ids";
 import { createLogger } from "@/lib/logger";
@@ -63,6 +64,18 @@ export const expireApprovalsTask: WorkerTask = {
   run: async () => {
     const n = expireApprovals();
     if (n > 0) log.info("approvals expired", { count: n });
+  },
+};
+
+/** Notifications WhatsApp jamais parties (WhatsApp indisponible au moment de l'analyse). */
+export const notifyApprovalsTask: WorkerTask = {
+  name: "notify_approvals",
+  intervalSeconds: 120,
+  lockTtlSeconds: 300,
+  run: async () => {
+    if (!isWhatsappConfigured()) return;
+    const n = await notifyUnsentApprovals();
+    if (n > 0) log.info("approval notifications sent", { count: n });
   },
 };
 

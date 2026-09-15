@@ -42,7 +42,7 @@ Outlook → Microsoft Graph → EMA (worker) → Contexte (thread + règles + so
       → WhatsApp (validation) → Exécution → Outlook / Documents → Historique
 ```
 
-Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`.
+Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`.
 
 ## 4. Structure du projet
 
@@ -110,9 +110,11 @@ tests/            vitest
 ## 9. Règles WhatsApp
 
 - Un message de validation = un `approval` lié à une action, avec boutons `VALIDER` / `REFUSER` (et `MODIFIER` si pertinent).
-- L'ID de bouton encode l'`approval_id` ; le webhook vérifie la signature Meta (`X-Hub-Signature-256`) avec `WHATSAPP_APP_SECRET` si fourni et le `WHATSAPP_VERIFY_TOKEN` à l'abonnement.
+- L'ID de bouton encode l'`approval_id` ; le webhook vérifie la signature Meta (`X-Hub-Signature-256`) avec `WHATSAPP_APP_SECRET` (obligatoire en production) et le `WHATSAPP_VERIFY_TOKEN` à l'abonnement.
+- Seul `WHATSAPP_APPROVER_PHONE` peut valider ; tout autre numéro est ignoré. Les événements sont dédoublonnés par identifiant Meta (`webhook_events`).
 - Une validation reçue pour une action déjà traitée est ignorée (idempotence).
-- Une demande expire après `settings.approvals.expireAfterHours` → statut `EXPIRED`, action `REJECTED`.
+- Une demande expire après `settings.approvals.expireAfterHours` → statut `EXPIRED` ; l'action reste `WAITING_APPROVAL`, jamais exécutée sans décision (renvoi possible depuis l'interface).
+- Une seule demande active par action : pas de renvoi tant qu'une demande `PENDING` a été notifiée.
 - Ne jamais envoyer de secret ou de pièce jointe brute sur WhatsApp ; uniquement résumé, montant, société, action proposée, réponse proposée.
 
 ## 10. Règles signatures / tampons

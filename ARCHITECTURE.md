@@ -93,6 +93,7 @@ Voir section 4.
 | `settings_kv` | Paires clé/valeur runtime (dernier scan, état setup) |
 | `chat_messages` | Historique du Chat EMA |
 | `llm_runs` | Journal des appels Claude (modèle, tokens, durée, issue), sans contenu |
+| `webhook_events` | Dédoublonnage des événements entrants (WhatsApp), identifiant Meta unique |
 
 Les **règles**, **sociétés**, **contacts** et **paramètres** sont dans `config/*.json` (source de vérité éditable via l'UI et par le client en SSH). SQLite ne stocke que des données de fonctionnement.
 
@@ -106,7 +107,8 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 ```
 
 - `riskLevel` : `LOW` (préparer une réponse), `MEDIUM` (envoyer une réponse, transférer), `HIGH` (email lié à un paiement, relance engageante), `CRITICAL` (signature/tampon).
-- `requires_approval = riskLevel ∈ {HIGH, CRITICAL} || règle "require_approval" || analyse.requires_approval || settings.autoReplyEnabled == false` pour un envoi.
+- `requires_approval = riskLevel ∈ {HIGH, CRITICAL} || règle "require_approval" || analyse.requires_approval || settings.autoReplyEnabled == false` pour un envoi. En phase 3, toute réponse email issue de l'analyse est explicitement soumise à validation.
+- Expiration d'une demande : l'approval passe `EXPIRED`, l'action reste `WAITING_APPROVAL` (renvoi possible). `FAILED → APPROVED` uniquement par « Réessayer » explicite.
 - Exécution : `executeAction(id)` fait `UPDATE actions SET status='EXECUTING' WHERE id=? AND status='APPROVED'` ; si 0 ligne modifiée → déjà en cours/exécutée → abandon (idempotence).
 - Les exécuteurs (`src/actions/executors/*`) sont enregistrés par `type` : `reply_email`, `forward_email`, `send_email`, `sign_document`, `payment_request`, `deposit_request`, `followup`.
 
@@ -119,9 +121,10 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 
 ## 7. WhatsApp
 
-- Envoi : `POST https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages` type `interactive` (`reply` buttons `VALIDER`, `REFUSER`, `MODIFIER`).
-- Réception : `GET /api/whatsapp/webhook` (vérification `hub.verify_token`), `POST` (événements `button_reply`).
-- Le `button.id` = `approve:<approval_id>` / `reject:<approval_id>` / `edit:<approval_id>`.
+- Envoi : `POST https://graph.facebook.com/{version}/{PHONE_NUMBER_ID}/messages` type `interactive` (boutons `✅ Valider`, `❌ Refuser`), texte long en message séparé si nécessaire. Client centralisé `src/integrations/whatsapp/client.ts` (retries 429/5xx bornés).
+- Réception : `GET /api/integrations/whatsapp/webhook` (vérification `hub.verify_token`), `POST` (signature `X-Hub-Signature-256`, événements `button_reply`).
+- Le `button.id` = `approve:<approval_id>` / `reject:<approval_id>`. La modification d'un brouillon se fait depuis l'interface (page À valider).
+- Service `src/integrations/whatsapp/approvals.ts` : notification unique par approval, décision via l'Action Engine (`approveAndExecute` / `rejectAction`), dédoublonnage `webhook_events`, contrôle du numéro autorisé. Détails : `docs/whatsapp.md`.
 
 ## 8. Signatures / tampons
 

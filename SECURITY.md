@@ -35,8 +35,9 @@
 
 ## 5. Webhooks
 
-- WhatsApp : vérification `hub.verify_token` à l'abonnement ; vérification `X-Hub-Signature-256` (HMAC SHA-256 avec `WHATSAPP_APP_SECRET`) sur chaque POST si le secret est configuré ; rejet sinon en production.
-- Réponses de validation acceptées uniquement depuis `WHATSAPP_RECIPIENT_NUMBER`.
+- WhatsApp : vérification `hub.verify_token` à l'abonnement (comparaison en temps constant) ; vérification `X-Hub-Signature-256` (HMAC SHA-256 du corps brut avec `WHATSAPP_APP_SECRET`) sur chaque POST ; en production, webhook refusé (503) si le secret manque.
+- Réponses de validation acceptées uniquement depuis `WHATSAPP_APPROVER_PHONE` ; tout autre numéro est ignoré.
+- Dédoublonnage par identifiant de message Meta (`webhook_events`) ; JSON validé par zod ; décisions à usage unique. Détails : `docs/whatsapp.md`.
 
 ## 6. Interface web
 
