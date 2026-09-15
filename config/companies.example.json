@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "companies": [
+    {
+      "id": "entreprise-x",
+      "name": "Entreprise X",
+      "legalForm": "SAS",
+      "siret": "",
+      "address": "1 rue de l'Exemple, 75000 Paris",
+      "signatory": { "name": "Prénom Nom", "title": "Président" },
+      "signaturePath": "signatures/entreprise-x.png",
+      "stampPath": "stamps/entreprise-x.png",
+      "aliases": ["Entreprise X", "ENTREPRISE X SAS"]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "company": {
+    "name": "Mon Entreprise",
+    "userName": "Prénom Nom",
+    "email": "moi@mon-entreprise.fr",
+    "language": "fr",
+    "timezone": "Europe/Paris"
+  },
+  "mailbox": {
+    "pollIntervalSeconds": 120,
+    "maxEmailsPerScan": 25,
+    "ignoreFolders": ["Junk Email", "Deleted Items"]
+  },
+  "agent": {
+    "signatureText": "Cordialement,\nPrénom Nom",
+    "tone": "professionnel",
+    "autoReplyEnabled": false,
+    "defaultFollowupDelayDays": 5
+  },
+  "approvals": {
+    "channel": "whatsapp",
+    "expireAfterHours": 48
+  }
+}

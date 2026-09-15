@@ -1,0 +1,1 @@
+L'email ci-dessous a été envoyé et n'a pas reçu de réponse. Rédige une relance courte, courtoise et professionnelle, dans le même thread, qui rappelle la demande initiale et propose une échéance raisonnable. Ne modifie pas le fond de la demande initiale. N'invente aucune information.

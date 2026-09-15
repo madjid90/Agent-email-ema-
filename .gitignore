@@ -1,0 +1,41 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Données client (restent sur le VPS)
+data/*
+!data/.gitkeep
+private/*
+!private/.gitkeep
+tokens/
+signatures/
+stamps/
+documents/
+signed-documents/
+
+# Configuration réelle du client (seuls les *.example.json sont versionnés)
+config/*.json
+!config/*.example.json
+
+# Node / Next
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Sauvegardes
+backups/
+
+# Divers
+.DS_Store
+.vscode/
+.idea/
+coverage/
+.vitest/

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "contacts": [
+    { "id": "magali", "name": "Magali", "email": "magali@exemple.fr", "role": "Comptabilité transport de fonds", "internal": true },
+    { "id": "nabila", "name": "Nabila", "email": "nabila@exemple.fr", "role": "Comptabilité fournisseurs", "internal": true },
+    { "id": "julie", "name": "Julie", "email": "julie@exemple.fr", "role": "Paie", "internal": true },
+    { "id": "solene", "name": "Solène", "email": "solene@exemple.fr", "role": "RH", "internal": true },
+    { "id": "khalil", "name": "Khalil", "email": "khalil@exemple.fr", "role": "ERP / IT", "internal": true }
+  ]
+}
