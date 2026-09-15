@@ -135,20 +135,62 @@ export interface WebhookEventRow {
   result: string | null;
 }
 
-export type FollowupStatus = "SCHEDULED" | "CHECKING" | "WAITING_APPROVAL" | "COMPLETED" | "CANCELLED" | "FAILED";
+/**
+ * Machine d'état d'une relance (phase 7). `SCHEDULED` et `CHECK_FAILED` sont les
+ * seuls statuts repris par le worker ; `SENT`, `RESPONSE_RECEIVED`, `CANCELLED`,
+ * `SUPERSEDED`, `MAX_ATTEMPTS_REACHED` et `DONE` sont terminaux.
+ */
+export type FollowupStatus =
+  | "SCHEDULED"
+  | "CHECKING"
+  | "CHECK_FAILED"
+  | "RESPONSE_RECEIVED"
+  | "REVIEW_REQUIRED"
+  | "WAITING_APPROVAL"
+  | "REMINDED"
+  | "SENT"
+  | "CANCELLED"
+  | "SUPERSEDED"
+  | "MAX_ATTEMPTS_REACHED"
+  | "FAILED"
+  | "DONE";
+
+export type FollowupKind = "EXTERNAL_FOLLOWUP" | "INTERNAL_REMINDER";
+
+/** Statuts qui n'entraîneront plus jamais d'envoi. */
+export const TERMINAL_FOLLOWUP_STATUSES: FollowupStatus[] = ["RESPONSE_RECEIVED", "SENT", "CANCELLED", "SUPERSEDED", "MAX_ATTEMPTS_REACHED", "DONE"];
 
 export interface FollowupRow {
   id: string;
+  kind: FollowupKind;
   thread_id: string;
   email_id: string | null;
   recipient: string | null;
+  company_id: string | null;
+  document_id: string | null;
+  title: string | null;
   reason: string;
   execute_at: string;
+  /** Ancrage : seuls les messages postérieurs comptent comme réponse. */
+  watch_after: string | null;
   status: FollowupStatus;
   attempts: number;
   max_attempts: number;
+  /** Action à l'origine de la relance (ex. demande de règlement). */
   action_id: string | null;
+  /** Action `reply_email` créée à l'échéance. */
+  generated_action_id: string | null;
+  last_reply_email_id: string | null;
+  requires_human_review: number;
+  notification_pending: number;
+  notify_attempts: number;
+  notified_at: string | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+  cancellation_reason: string | null;
+  created_by: string;
   created_at: string;
+  updated_at: string | null;
   completed_at: string | null;
   cancelled_at: string | null;
 }

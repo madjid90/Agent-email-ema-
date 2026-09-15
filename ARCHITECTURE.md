@@ -142,6 +142,14 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 - `src/agent/references.ts` : références numérotées enregistrées avec la réponse (`chat_messages.refs`) pour résoudre « le premier », « le deuxième », « réponds-lui ».
 - Après une préparation, le routeur envoie la réponse courte puis la carte de validation habituelle (`notifyPendingApproval`). Détails : `docs/whatsapp-assistant.md`.
 
-## 10. Déploiement
+## 10. Relances intelligentes (Phase 7)
+
+- `src/followups/schedule.ts` : intention temporelle → instant réel (fuseau du client, heure par défaut, jours ouvrés). Le modèle ne produit jamais d'horodatage.
+- `src/followups/detect.ts` : classification déterministe d'une réponse (humaine / automatique / ambiguë) et détection d'un message sortant plus récent, à partir de l'ancrage `watch_after`.
+- `src/followups/draft.ts` : contexte borné (thread encapsulé, raison, tentative) → sortie structurée `followupProposalSchema`.
+- `src/followups/service.ts` : programmation, traitement des échéances (verrou atomique `SCHEDULED → CHECKING`, vérification Microsoft Graph obligatoire), création de l'action `reply_email`, réconciliation avec l'Action Engine, report, annulation, rappels internes, notifications proactives.
+- Tâche worker `process_followups` (5 min, sous verrou SQLite). Détails : `docs/followups.md`.
+
+## 11. Déploiement
 
 Ubuntu VPS : Node 20+, PM2 (`ema-web`, `ema-worker`), Nginx reverse proxy, Certbot HTTPS. Voir `docs/deployment.md`.

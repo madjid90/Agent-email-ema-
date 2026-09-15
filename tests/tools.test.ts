@@ -29,7 +29,7 @@ describe("Couche de tools", () => {
 
   it("enregistre tous les tools prévus par TOOLS.md", () => {
     const names = listTools().map((t) => t.name);
-    for (const n of ["get_new_emails", "get_email", "get_email_thread", "search_emails", "get_attachment", "reply_email", "forward_email", "send_email", "extract_pdf_text", "classify_document", "extract_invoice_data", "extract_quote_data", "archive_document", "search_documents", "get_document", "list_pending_actions", "prepare_payment_request", "prepare_deposit_request", "schedule_followup", "cancel_followup", "check_reply_received", "request_approval", "get_approval_status", "prepare_signed_document"]) {
+    for (const n of ["get_new_emails", "get_email", "get_email_thread", "search_emails", "get_attachment", "reply_email", "forward_email", "send_email", "extract_pdf_text", "classify_document", "extract_invoice_data", "extract_quote_data", "archive_document", "search_documents", "get_document", "list_pending_actions", "prepare_payment_request", "prepare_deposit_request", "schedule_followup", "cancel_followup", "check_reply_received", "list_followups", "postpone_followup", "prepare_followup_now", "request_approval", "get_approval_status", "prepare_signed_document"]) {
       expect(names).toContain(n);
     }
   });
@@ -102,8 +102,10 @@ describe("Couche de tools", () => {
 
   it("schedule_followup + check_reply_received", async () => {
     const e = emails.insertEmail({ graphId: "g3", threadId: "t3", direction: "outbound", subject: "Question", receivedAt: "2026-09-15T10:00:00.000Z" }, db);
-    const r = await executeTool("schedule_followup", { email_id: e.id, execute_at: "2026-09-20T09:00:00.000Z", reason: "Pas de réponse" }, ctx(db, "analyze"));
+    const r = await executeTool("schedule_followup", { email_id: e.id, when: { in_days: 5 }, reason: "Pas de réponse" }, ctx(db, "analyze"));
     expect(r.ok).toBe(true);
+    // La date finale est calculée côté serveur : le modèle ne fournit jamais d'horodatage.
+    if (r.ok) expect((r.data as { execute_at: string }).execute_at > new Date().toISOString()).toBe(true);
     const none = await executeTool("check_reply_received", { thread_id: "t3", since: "2026-09-15T10:00:00.000Z" }, ctx(db, "followup"));
     expect(none.ok && (none.data as { replied: boolean }).replied).toBe(false);
     emails.insertEmail({ graphId: "g4", threadId: "t3", subject: "Re: Question", receivedAt: "2026-09-16T10:00:00.000Z" }, db);

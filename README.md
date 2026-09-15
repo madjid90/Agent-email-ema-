@@ -47,6 +47,7 @@ Au premier démarrage, `config/*.json` est créé à partir de `config/*.example
 - [docs/documents.md](docs/documents.md) — factures, paiements, Document Engine
 - [docs/signatures.md](docs/signatures.md) — devis, bon pour accord, signature graphique et tampon
 - [docs/whatsapp-assistant.md](docs/whatsapp-assistant.md) — piloter EMA depuis WhatsApp
+- [docs/followups.md](docs/followups.md) — relances intelligentes et rappels internes
 
 ## Licence
 

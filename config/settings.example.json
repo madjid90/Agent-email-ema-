@@ -34,5 +34,14 @@
     "warningAmount": 10000,
     "replySubjectPrefix": "Devis signé —",
     "replyTemplate": "Bonjour,\n\nVeuillez trouver en pièce jointe le devis signé avec notre bon pour accord.\n\nBien cordialement,"
+  },
+  "followups": {
+    "enabled": true,
+    "defaultDelayDays": 3,
+    "defaultTime": "09:00",
+    "maxAttempts": 2,
+    "businessDaysOnly": false,
+    "requireApproval": true,
+    "autoReplyPostponeDays": 1
   }
 }

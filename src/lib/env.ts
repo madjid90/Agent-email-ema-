@@ -31,6 +31,9 @@ const envSchema = z.object({
   WHATSAPP_API_VERSION: z.string().trim().default("v21.0"),
   /** Assistant conversationnel WhatsApp (phase 6). À false : seules les validations fonctionnent. */
   WHATSAPP_ASSISTANT_ENABLED: optionalBool(true),
+  /** Template Meta utilisé pour les notifications proactives hors fenêtre de 24 h (phase 7). */
+  WHATSAPP_FOLLOWUP_TEMPLATE_NAME: optionalString,
+  WHATSAPP_FOLLOWUP_TEMPLATE_LANG: z.string().trim().default("fr"),
 
   APP_URL: z.string().trim().default("http://localhost:3000"),
   APP_SECRET: optionalString,

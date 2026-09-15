@@ -82,6 +82,14 @@ export function parseWebhook(json: unknown): WhatsappInboundEvent[] {
   return events;
 }
 
+/** Boutons de rappel interne (phase 7) : done:<followup_id> / snooze:<followup_id>. */
+export function parseReminderButtonId(id: string | null): { decision: "done" | "snooze"; followupId: string } | null {
+  if (!id) return null;
+  const m = /^(done|snooze):(fup_[a-f0-9]{6,40})$/.exec(id.trim());
+  if (!m) return null;
+  return { decision: m[1] as "done" | "snooze", followupId: m[2] as string };
+}
+
 /** Identifiants de boutons : approve:<approval_id> / reject:<approval_id>. */
 export function parseButtonId(id: string | null): { decision: "approve" | "reject"; approvalId: string } | null {
   if (!id) return null;

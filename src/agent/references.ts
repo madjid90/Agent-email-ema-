@@ -14,7 +14,7 @@ import type { ToolResult } from "@/tools";
  */
 export const conversationRefSchema = z.object({
   index: z.number().int().min(1),
-  kind: z.enum(["email", "document", "action", "contact"]),
+  kind: z.enum(["email", "document", "action", "contact", "followup"]),
   id: z.string().min(1),
   label: z.string(),
   /** Décision en attente de désambiguïsation (« valide » avec plusieurs actions). */
@@ -48,11 +48,13 @@ export function refsFromToolResult(tool: string, result: ToolResult<unknown>): O
   const out: Omit<ConversationRef, "index">[] = [];
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
+    const followupId = str(row, "followup_id");
     const emailId = str(row, "email_id");
     const documentId = str(row, "document_id");
     const actionId = str(row, "action_id");
     const contactEmail = str(row, "email");
-    if (actionId) out.push({ kind: "action", id: actionId, label: str(row, "title") ?? str(row, "type") ?? "action", pendingDecision: null });
+    if (followupId) out.push({ kind: "followup", id: followupId, label: [str(row, "recipient"), str(row, "title") ?? str(row, "reason"), str(row, "execute_at")].filter(Boolean).join(" — ") || "relance", pendingDecision: null });
+    else if (actionId) out.push({ kind: "action", id: actionId, label: str(row, "title") ?? str(row, "type") ?? "action", pendingDecision: null });
     else if (documentId) out.push({ kind: "document", id: documentId, label: documentLabel(row), pendingDecision: null });
     else if (emailId) out.push({ kind: "email", id: emailId, label: emailLabel(row), pendingDecision: null });
     else if (str(row, "contact_id") && contactEmail) out.push({ kind: "contact", id: contactEmail, label: `${str(row, "name") ?? contactEmail} <${contactEmail}>`, pendingDecision: null });

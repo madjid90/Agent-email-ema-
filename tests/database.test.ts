@@ -43,8 +43,8 @@ describe("SQLite", () => {
     expect(followups.listDueFollowups("2026-01-01T00:00:00.000Z", db).map((x) => x.id)).toEqual([f.id]);
     expect(followups.rescheduleFollowup(f.id, "2030-01-01T00:00:00.000Z", db)).toBe(true);
     expect(followups.listDueFollowups("2026-01-01T00:00:00.000Z", db)).toHaveLength(0);
-    expect(followups.cancelFollowup(f.id, db)).toBe(true);
-    expect(followups.cancelFollowup(f.id, db)).toBe(false);
+    expect(followups.cancelFollowup(f.id, "Test", db)).toBe(true);
+    expect(followups.cancelFollowup(f.id, "Test", db)).toBe(false);
     expect(followups.getFollowup(f.id, db)?.status).toBe("CANCELLED");
   });
 

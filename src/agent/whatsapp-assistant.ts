@@ -34,10 +34,26 @@ export const WHATSAPP_READ_TOOLS = [
   "list_pending_actions",
   "get_approval_status",
   "get_today_summary",
+  "list_followups",
+  "check_reply_received",
 ] as const;
 
 /** Outils de préparation : ils créent une action soumise à validation, jamais un envoi. */
-export const WHATSAPP_PREPARE_TOOLS = ["reply_email", "forward_email", "send_email", "prepare_document_forward", "prepare_payment_request", "prepare_deposit_request", "prepare_signed_document", "update_draft"] as const;
+export const WHATSAPP_PREPARE_TOOLS = [
+  "reply_email",
+  "forward_email",
+  "send_email",
+  "prepare_document_forward",
+  "prepare_payment_request",
+  "prepare_deposit_request",
+  "prepare_signed_document",
+  "update_draft",
+  "schedule_followup",
+  "postpone_followup",
+  "cancel_followup",
+  "complete_reminder",
+  "prepare_followup_now",
+] as const;
 
 export const WHATSAPP_TOOLS = [...WHATSAPP_READ_TOOLS, ...WHATSAPP_PREPARE_TOOLS] as const;
 

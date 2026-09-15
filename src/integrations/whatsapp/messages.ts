@@ -1,4 +1,4 @@
-import { WHATSAPP_LIMITS, type WhatsappInteractiveMessage, type WhatsappTextMessage } from "./types";
+import { WHATSAPP_LIMITS, type WhatsappInteractiveMessage, type WhatsappTemplateMessage, type WhatsappTextMessage } from "./types";
 
 export interface ApprovalMessageInput {
   approvalId: string;
@@ -25,6 +25,7 @@ const ACTION_TITLES: Record<string, string> = {
   payment_request: "💳 EMA — Demande de paiement",
   deposit_request: "💳 EMA — Demande d'acompte",
   sign_document: "📄 EMA — Devis à signer",
+  followup_reply: "🔁 EMA — Relance à valider",
   send_followup: "⏰ EMA — Relance à valider",
 };
 const DEFAULT_TITLE = "📩 EMA — Action à valider";
@@ -42,7 +43,7 @@ export function formatApprovalBody(m: ApprovalMessageInput): string {
   for (const d of m.details ?? []) lines.push(`${d.label} : ${d.value}`);
   if (m.summary) lines.push("", `Résumé : ${m.summary}`);
   lines.push("", `Action proposée : ${m.proposedAction}`);
-  if (m.proposedReply) lines.push("", m.kind === "reply_email" ? "Réponse proposée :" : "Message proposé :", `"${m.proposedReply.trim()}"`);
+  if (m.proposedReply) lines.push("", m.kind === "reply_email" ? "Réponse proposée :" : m.kind === "followup_reply" ? "Relance proposée :" : "Message proposé :", `"${m.proposedReply.trim()}"`);
   if (m.confidence !== null) lines.push("", `Confiance : ${Math.round(m.confidence * 100)} %`);
   if (m.humanReviewNote) lines.push(`⚠ ${m.humanReviewNote}`);
   if (m.note) lines.push("", m.note);
@@ -76,3 +77,37 @@ export function textMessage(to: string, body: string): WhatsappTextMessage {
 }
 
 export const TEST_MESSAGE = "✅ EMA est correctement connecté à WhatsApp.";
+
+/** Message template (notification proactive hors fenêtre de 24 h). */
+export function templateMessage(to: string, name: string, language: string, parameters: string[] = []): WhatsappTemplateMessage {
+  return {
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name,
+      language: { code: language },
+      ...(parameters.length ? { components: [{ type: "body" as const, parameters: parameters.map((text) => ({ type: "text" as const, text: cut(text, 300) })) }] } : {}),
+    },
+  };
+}
+
+/** Boutons d'un rappel interne : terminé / reporter. */
+export function reminderMessage(to: string, followupId: string, title: string, detail: string): WhatsappInteractiveMessage {
+  return {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: cut(`⏰ EMA — Rappel\n\n${title}${detail ? `\n\n${detail}` : ""}`, WHATSAPP_LIMITS.interactiveBody) },
+      footer: { text: cut("Aucun email n'est envoyé pour un rappel.", WHATSAPP_LIMITS.interactiveFooter) },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: `done:${followupId}`, title: "✅ Terminé" } },
+          { type: "reply", reply: { id: `snooze:${followupId}`, title: "⏭ Reporter" } },
+        ],
+      },
+    },
+  };
+}

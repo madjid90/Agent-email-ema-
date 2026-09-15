@@ -1,25 +1,29 @@
 import { z } from "zod";
 import { route, ok, parseBody } from "@/lib/api";
-import { cancelFollowup, getFollowup, rescheduleFollowup } from "@/database/repositories/followups";
-import { logHistory } from "@/database/repositories/history";
-import { EmaError, NotImplementedError } from "@/lib/errors";
-import { addDays } from "@/lib/time";
-import { nowIso } from "@/lib/ids";
+import { getFollowup } from "@/database/repositories/followups";
+import { EmaError } from "@/lib/errors";
+import { cancelFollowup, completeReminder, postponeFollowup, processFollowup } from "@/followups/service";
 
+/**
+ * Actions sur une relance depuis l'interface : annuler, reporter, marquer un
+ * rappel comme traité, ou traiter l'échéance immédiatement (vérification
+ * Outlook puis brouillon soumis à validation — jamais d'envoi direct).
+ */
 export const PATCH = route(async (req, ctx: { params: Promise<{ id: string }> }) => {
   const { id } = await ctx.params;
-  const body = await parseBody(req, z.object({ action: z.enum(["cancel", "postpone", "execute_now"]), days: z.number().int().min(1).max(60).default(3) }));
+  const body = await parseBody(req, z.object({ action: z.enum(["cancel", "postpone", "prepare_now", "done"]), days: z.number().int().min(1).max(60).default(3) }));
   const f = getFollowup(id);
   if (!f) throw new EmaError("NOT_FOUND", `Relance ${id} introuvable`);
+
   if (body.action === "cancel") {
-    if (!cancelFollowup(id)) throw new EmaError("INVALID_TRANSITION", `Relance ${id} en statut ${f.status}`);
-    logHistory({ eventType: "followup.cancelled", message: "Relance annulée par l'utilisateur", actor: "user", followupId: id, emailId: f.email_id });
-  } else if (body.action === "postpone") {
-    const executeAt = addDays(f.execute_at > nowIso() ? f.execute_at : nowIso(), body.days);
-    if (!rescheduleFollowup(id, executeAt)) throw new EmaError("INVALID_TRANSITION", `Relance ${id} en statut ${f.status}`);
-    logHistory({ eventType: "followup.postponed", message: `Relance reportée au ${executeAt}`, actor: "user", followupId: id, emailId: f.email_id });
-  } else {
-    throw new NotImplementedError("Exécution immédiate d'une relance", "phase 6");
+    return ok({ followup: cancelFollowup(id, "Annulée depuis l'interface", { actor: "user" }) });
   }
-  return ok(getFollowup(id));
+  if (body.action === "postpone") {
+    return ok({ followup: postponeFollowup(id, { in_days: body.days }, { actor: "user" }) });
+  }
+  if (body.action === "done") {
+    return ok({ followup: completeReminder(id, { actor: "user" }) });
+  }
+  const result = await processFollowup(id, { actor: "user" });
+  return ok({ followup: getFollowup(id), outcome: result.outcome, action_id: result.actionId, message: result.message });
 });

@@ -48,6 +48,22 @@ export const settingsSchema = z.object({
       replyTemplate: z.string().default("Bonjour,\n\nVeuillez trouver en pièce jointe le devis signé avec notre bon pour accord.\n\nBien cordialement,"),
     })
     .default({ warningAmount: 10000, replySubjectPrefix: "Devis signé —", replyTemplate: "Bonjour,\n\nVeuillez trouver en pièce jointe le devis signé avec notre bon pour accord.\n\nBien cordialement," }),
+  followups: z
+    .object({
+      /** Relances et rappels internes (phase 7). */
+      enabled: z.boolean().default(true),
+      defaultDelayDays: z.number().int().min(1).max(60).default(3),
+      /** Heure locale par défaut quand l'utilisateur ne précise pas d'heure. */
+      defaultTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("09:00"),
+      maxAttempts: z.number().int().min(1).max(10).default(2),
+      /** Samedi/dimanche → prochain jour ouvré (pas de gestion des jours fériés). */
+      businessDaysOnly: z.boolean().default(false),
+      /** V1 : toute relance sortante exige une validation. Ne peut pas être désactivé. */
+      requireApproval: z.literal(true).default(true),
+      /** Report appliqué quand une réponse automatique est détectée. */
+      autoReplyPostponeDays: z.number().int().min(1).max(30).default(1),
+    })
+    .default({ enabled: true, defaultDelayDays: 3, defaultTime: "09:00", maxAttempts: 2, businessDaysOnly: false, requireApproval: true, autoReplyPostponeDays: 1 }),
   analysis: z
     .object({
       /** ≥ reliable : analyse fiable ; entre review et reliable : avertissement ; < review : validation humaine. */

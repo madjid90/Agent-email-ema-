@@ -1,6 +1,6 @@
 {
   "name": "ema",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "EMA - Agent administratif IA pour une boîte Outlook professionnelle (instance privée, déployée sur VPS)",
   "scripts": {

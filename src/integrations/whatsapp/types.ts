@@ -25,7 +25,25 @@ export interface WhatsappInteractiveMessage {
   };
 }
 
-export type WhatsappOutgoingMessage = WhatsappTextMessage | WhatsappInteractiveMessage;
+/**
+ * Message basé sur un template approuvé par Meta : seul format autorisé hors
+ * de la fenêtre de 24 h (notifications proactives, phase 7).
+ */
+export interface WhatsappTemplateMessage {
+  messaging_product: "whatsapp";
+  to: string;
+  type: "template";
+  template: {
+    name: string;
+    language: { code: string };
+    components?: { type: "body"; parameters: { type: "text"; text: string }[] }[];
+  };
+}
+
+export type WhatsappOutgoingMessage = WhatsappTextMessage | WhatsappInteractiveMessage | WhatsappTemplateMessage;
+
+/** Codes Meta signalant que la fenêtre de 24 h est fermée (template obligatoire). */
+export const OUTSIDE_WINDOW_CODES = [131047, 131026, 470] as const;
 
 export interface WhatsappSendResponse {
   messaging_product?: string;

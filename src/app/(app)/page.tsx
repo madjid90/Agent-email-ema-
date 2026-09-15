@@ -4,11 +4,12 @@ import { getDb } from "@/database/connection";
 import { countEmails } from "@/database/repositories/emails";
 import { analysisStats, listEmailsWithAnalysis } from "@/database/repositories/analyses";
 import { listActions } from "@/database/repositories/actions";
-import { listFollowups } from "@/database/repositories/followups";
+import { listFollowups, followupStats } from "@/database/repositories/followups";
 import { llmUsageSince } from "@/database/repositories/llm-runs";
 import { documentStats } from "@/database/repositories/documents";
 import { getSettings } from "@/lib/config";
-import { startOfTodayIso, formatTime, formatAmount } from "@/lib/time";
+import { startOfTodayIso, formatTime, formatAmount, formatDateTime } from "@/lib/time";
+import { dayBounds } from "@/followups/schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -50,8 +51,12 @@ export default function TodayPage() {
   const docs = documentStats(since, db);
   const financialPending = pendingFinancial(db);
   const pending = listActions({ status: "WAITING_APPROVAL", limit: 50 }, db);
-  const todayEnd = new Date(new Date(since).getTime() + 86_400_000).toISOString();
-  const followupsToday = listFollowups({ status: ["SCHEDULED", "WAITING_APPROVAL"] }, db).filter((f) => f.execute_at >= since && f.execute_at < todayEnd);
+  const bounds = dayBounds(tz);
+  const followupCounts = followupStats(bounds.start, bounds.end, db);
+  const followupsToday = listFollowups({ status: ["SCHEDULED", "CHECK_FAILED", "CHECKING", "REMINDED"], dueBefore: bounds.end, limit: 20 }, db);
+  const followupsWaiting = listFollowups({ status: "WAITING_APPROVAL", limit: 20 }, db);
+  const followupsAnswered = listFollowups({ status: "RESPONSE_RECEIVED", limit: 20 }, db).filter((f) => (f.updated_at ?? f.created_at) >= bounds.start);
+  const followupsAttention = listFollowups({ status: ["MAX_ATTEMPTS_REACHED", "REVIEW_REQUIRED", "FAILED"], limit: 20 }, db);
   const analyzed = listEmailsWithAnalysis({ since, limit: 200 }, db).filter((e) => e.category !== null);
   const attention = analyzed.filter((e) => e.urgency === "HIGH" || e.urgency === "CRITICAL" || e.requires_human_review === 1 || e.needs_reply === 1);
   const priorities = analyzed
@@ -71,7 +76,7 @@ export default function TodayPage() {
         <Stat label="Validation humaine requise" value={stats.humanReview} tone={stats.humanReview ? "warn" : undefined} />
         <Stat label="Factures détectées" value={stats.invoices} />
         <Stat label="Devis / documents à signer" value={stats.quotes} />
-        <Stat label="Relances du jour" value={followupsToday.length} />
+        <Stat label="Relances du jour" value={followupCounts.today} tone={followupCounts.today ? "warn" : undefined} />
       </div>
       <div className="grid grid-4">
         <Stat label="Factures reçues aujourd'hui" value={docs.invoices} />
@@ -82,6 +87,46 @@ export default function TodayPage() {
       {docs.bankChanges ? <div className="alert danger">⚠️ {docs.bankChanges} document(s) annonçant un changement de coordonnées bancaires — vérification humaine requise, aucune action financière.</div> : null}
       {financialPending ? <div className="alert info">{financialPending} action(s) financière(s) administrative(s) à valider (transfert de facture, demande de règlement). <Link href="/a-valider">Voir</Link></div> : null}
       {stats.failed ? <div className="alert danger">{stats.failed} analyse(s) en échec aujourd&apos;hui : ouvrir l&apos;email puis « Réanalyser ».</div> : null}
+
+      <div className="grid grid-4">
+        <Stat label="Relances à valider" value={followupCounts.waitingApproval} tone={followupCounts.waitingApproval ? "warn" : undefined} />
+        <Stat label="Réponses reçues (relances annulées)" value={followupCounts.responded} tone={followupCounts.responded ? "ok" : undefined} />
+        <Stat label="Suivis sans réponse" value={followupCounts.needsAttention} tone={followupCounts.needsAttention ? "danger" : undefined} />
+        <Stat label="Rappels internes" value={followupCounts.reminders} />
+      </div>
+      {followupsToday.length || followupsWaiting.length || followupsAnswered.length || followupsAttention.length ? (
+        <Card title="Relances et rappels" actions={<Link className="btn small" href="/relances">Voir les relances</Link>}>
+          {followupsWaiting.map((f) => (
+            <div className="priority" key={f.id}>
+              <span className="dot orange" />
+              <div style={{ flex: 1 }}><strong>Relance à valider</strong> — {f.recipient ?? f.reason} <span className="muted">({f.attempts + 1}/{f.max_attempts})</span></div>
+              <Link className="btn small primary" href="/a-valider">Valider</Link>
+            </div>
+          ))}
+          {followupsAttention.map((f) => (
+            <div className="priority" key={f.id}>
+              <span className="dot red" />
+              <div style={{ flex: 1 }}><strong>{f.status === "MAX_ATTEMPTS_REACHED" ? "Suivi sans réponse" : f.status === "REVIEW_REQUIRED" ? "Relance à vérifier" : "Préparation échouée"}</strong> — {f.recipient ?? f.reason}</div>
+              <Link className="btn small" href="/relances">Traiter</Link>
+            </div>
+          ))}
+          {followupsToday.map((f) => (
+            <div className="priority" key={f.id}>
+              <span className={`dot ${f.kind === "INTERNAL_REMINDER" ? "green" : "orange"}`} />
+              <div style={{ flex: 1 }}><strong>{f.kind === "INTERNAL_REMINDER" ? "Rappel" : "Relance prévue"}</strong> — {f.title ?? f.reason} <span className="muted">{f.recipient ? `· ${f.recipient}` : ""}</span></div>
+              <span className="muted">{formatDateTime(f.execute_at, tz)}</span>
+              <Link className="btn small" href="/relances">Voir</Link>
+            </div>
+          ))}
+          {followupsAnswered.map((f) => (
+            <div className="priority" key={f.id}>
+              <span className="dot green" />
+              <div style={{ flex: 1 }}><strong>Réponse reçue</strong> — relance annulée automatiquement {f.recipient ? <span className="muted">({f.recipient})</span> : null}</div>
+              {f.last_reply_email_id ? <Link className="btn small" href={`/emails/${f.last_reply_email_id}`}>Voir</Link> : null}
+            </div>
+          ))}
+        </Card>
+      ) : null}
 
       <Card title="Priorités" actions={<Link className="btn small" href="/emails">Voir les emails</Link>}>
         {priorities.length === 0 && pending.length === 0 ? (

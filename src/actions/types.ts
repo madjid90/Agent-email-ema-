@@ -41,6 +41,9 @@ export const replyEmailPayload = z.object({
   body: z.string().min(1),
   reply_all: z.boolean().default(false),
   attachments: z.array(z.string()).default([]),
+  /** Relance à l'origine de cette réponse (phase 7) : sert au message WhatsApp et au suivi. */
+  followup_id: z.string().nullable().default(null),
+  attempt: z.number().int().min(1).nullable().default(null),
 });
 export const forwardEmailPayload = z.object({
   email_id: z.string(),

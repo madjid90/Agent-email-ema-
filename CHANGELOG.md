@@ -2,6 +2,26 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [0.8.0] — Phase 7 — Relances intelligentes et rappels internes — 2026-09-15
+
+### Ajouté
+- Module `src/followups/` : `schedule.ts` (échéances calculées côté serveur à partir d'une intention — « dans 3 jours », « vendredi », date explicite, heure par défaut, jours ouvrés), `detect.ts` (classification déterministe réponse humaine / automatique / ambiguë, détection d'un message sortant plus récent, ancrage `watch_after`), `draft.ts` (contexte borné + sortie structurée `followupProposalSchema`), `service.ts` (programmation, traitement des échéances, réconciliation, report, annulation, rappels, notifications).
+- Migration `008_followups` : `scheduled_followups` reconstruite avec `kind`, `watch_after`, `company_id`, `document_id`, `title`, `generated_action_id`, `last_reply_email_id`, `requires_human_review`, `notification_pending`, `notify_attempts`, `notified_at`, `last_checked_at`, `last_error`, `cancellation_reason`, `created_by`, `updated_at` ; machine d'état à 13 statuts (données existantes conservées, `COMPLETED` → `SENT`).
+- Vérification Microsoft Graph **obligatoire** à l'échéance : sans vérification possible, la relance repasse en `CHECK_FAILED` et rien n'est envoyé ni préparé.
+- Brouillon de relance contextualisé (ton adapté à la tentative) → action `reply_email` dans le thread existant, `followup_id` et `attempt` dans le payload, validation obligatoire ; relance financière conservée en HIGH.
+- Carte WhatsApp dédiée « 🔁 EMA — Relance à valider » (contact, sujet, dernier message envoyé, réponse reçue, tentative) ; modification du brouillon via `update_draft`.
+- Rappels internes (`INTERNAL_REMINDER`) : notification WhatsApp avec boutons `Terminé` / `Reporter` traités par le routeur, sans aucun email.
+- Notifications proactives : dédoublonnage par `notified_at`, bascule sur un template Meta hors fenêtre de 24 h (`WHATSAPP_FOLLOWUP_TEMPLATE_NAME`, `WHATSAPP_FOLLOWUP_TEMPLATE_LANG`), sinon `notification_pending` visible dans l'interface — jamais comptée comme envoyée.
+- Tools `list_followups`, `postpone_followup`, `prepare_followup_now`, `complete_reminder` ; `schedule_followup` prend désormais une intention temporelle et non une date. Pilotage WhatsApp complet avec références multi-tours (« prépare le premier »).
+- `settings.followups` (`enabled`, `defaultDelayDays`, `defaultTime`, `maxAttempts`, `businessDaysOnly`, `requireApproval`, `autoReplyPostponeDays`).
+- Page Relances complète (À traiter, En attente de validation, Aujourd'hui, À venir, Envoyées, Annulées ; Voir le thread, Préparer maintenant, Reporter, Annuler, Terminé) et compteurs sur Aujourd'hui (relances du jour, à valider, réponses reçues, suivis sans réponse, rappels).
+- `docs/followups.md` ; 34 nouveaux tests (224 au total).
+
+### Modifié
+- Tâche worker `process_followups` : réconciliation, traitement des échéances sous verrou, reprise des vérifications interrompues, renvoi des notifications en attente.
+- `reply_email` accepte `followup_id` et `attempt` ; `setAnthropicClientForTests` ajouté pour les tests.
+- `CLAUDE.md` §10 bis, `BUSINESS_RULES.md` §7, `TOOLS.md`, `ARCHITECTURE.md` §10, `SECURITY.md` §4 ter, `ROADMAP.md` (VPS en phase 8).
+
 ## [0.7.0] — Phase 6 — Pilotage complet d'EMA depuis WhatsApp — 2026-09-15
 
 ### Ajouté

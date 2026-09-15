@@ -1,5 +1,7 @@
 import { expireApprovals } from "@/actions/engine";
-import { listDueFollowups } from "@/database/repositories/followups";
+import { listFollowups } from "@/database/repositories/followups";
+import { processDueFollowups, reconcileFollowups, notifyFollowup } from "@/followups/service";
+import { getSettings } from "@/lib/config";
 import { kvSet } from "@/database/repositories/kv";
 import { createConnectedGraphClient, isOutlookConnected, syncInbox } from "@/integrations/microsoft";
 import { analyzePendingEmails } from "@/agent/orchestrator";
@@ -46,15 +48,32 @@ export const analyzeEmailsTask: WorkerTask = {
   run: () => runAnalysis(5),
 };
 
-/** Relances échues (phase 6) : liste les relances dues et journalise. */
+/**
+ * Relances et rappels (phase 7). Sous verrou SQLite : une seule exécution à la
+ * fois, tous process confondus. Ordre : réconciliation des relances déjà
+ * validées → échéances (vérification Outlook obligatoire) → notifications
+ * proactives restées en attente.
+ */
 export const processFollowupsTask: WorkerTask = {
   name: "process_followups",
   intervalSeconds: 300,
-  lockTtlSeconds: 600,
+  lockTtlSeconds: 900,
   run: async () => {
-    const due = listDueFollowups();
+    if (!getSettings().followups.enabled) return;
+    const reconciled = reconcileFollowups();
+    const results = await processDueFollowups();
     kvSet("worker.last_followup_check_at", nowIso());
-    if (due.length) log.info("followups due", { count: due.length });
+    // Notifications proactives jamais parties (WhatsApp indisponible, fenêtre fermée).
+    let renotified = 0;
+    for (const f of listFollowups({ status: ["REMINDED", "MAX_ATTEMPTS_REACHED", "REVIEW_REQUIRED"], limit: 50 })) {
+      if (f.notification_pending === 1 && f.notified_at === null && f.notify_attempts < 5) {
+        const ok = await notifyFollowup(f.id, `⏰ EMA — ${f.title ?? f.reason}`);
+        if (ok) renotified++;
+      }
+    }
+    if (reconciled.length || results.length || renotified) {
+      log.info("followups processed", { reconciled: reconciled.length, due: results.length, renotified, outcomes: results.map((r) => r.outcome) });
+    }
   },
 };
 

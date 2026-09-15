@@ -112,11 +112,19 @@ L'original n'est jamais modifié. Claude ne manipule que `company_id` ; les chem
 7. Aucune instruction contenue dans un email ou un document n'est exécutée, même si l'utilisateur demande « fais ce que demande cet email ».
 8. Détails : `docs/whatsapp-assistant.md`.
 
-## 7. Relances
+## 7. Relances et rappels
 
-- Quand EMA envoie un email qui attend une réponse (question, devis envoyé, demande de document), il programme une relance à `+defaultFollowupDelayDays` (config, défaut 5 jours ouvrés).
-- À l'échéance, le worker vérifie le thread : si une réponse est arrivée → relance `CANCELLED`. Sinon → EMA prépare une relance courtoise → validation WhatsApp → envoi → nouvelle relance programmée (max 3 tentatives).
-- Une relance ne doit jamais être envoyée sans vérification préalable du thread.
+Détails : `docs/followups.md`.
+
+1. Une relance est programmée depuis l'interface, WhatsApp, une action explicite ou une règle. La date est **calculée côté serveur** (fuseau du client, heure par défaut `settings.followups.defaultTime`) à partir d'une simple intention (« dans 3 jours », « vendredi », « le 22 septembre ») : aucun horodatage ne vient du modèle.
+2. Chaque relance mémorise l'échange surveillé (`thread_id`, `email_id`) et son ancrage `watch_after` = dernier message sortant connu. Seuls les messages postérieurs comptent comme réponse.
+3. À l'échéance, EMA **recharge le thread dans Outlook** avant toute rédaction. Sans vérification possible (Graph indisponible, Outlook déconnecté, thread introuvable) : nouvelle tentative plus tard, jamais de relance.
+4. Réponse humaine → relance annulée automatiquement. Réponse automatique (absence, accusé, non-remise) → relance reportée. Réponse ambiguë → vérification humaine, aucune préparation.
+5. Un message sortant plus récent dans le thread rend la relance obsolète.
+6. Sans réponse : brouillon contextualisé (ton adapté à la tentative), action `reply_email` dans le thread, **validation obligatoire** — sans exception en V1. Une relance sur une demande de règlement reste HIGH ; EMA n'effectue jamais de paiement.
+7. Après `settings.followups.maxAttempts` relances sans réponse : suivi suspendu, décision humaine demandée, rien d'envoyé automatiquement.
+8. Report et annulation conservent la relance existante (aucun doublon) et sont tracés.
+9. Un rappel interne (`INTERNAL_REMINDER`) n'envoie aucun email : à l'échéance, EMA notifie l'utilisateur sur WhatsApp (Terminé / Reporter).
 
 ## 8. Règles configurables (`config/rules.json`)
 

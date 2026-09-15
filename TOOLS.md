@@ -59,8 +59,12 @@ Ces tools ne paient jamais : ils préparent un email interne et créent une acti
 
 | Tool | Entrée | Sortie | Risque |
 |---|---|---|---|
-| `schedule_followup` | `{ email_id, thread_id, execute_at, reason }` | `{ followup_id }` | LOW |
-| `cancel_followup` | `{ followup_id, reason? }` | `{ ok }` | LOW |
+| `schedule_followup` | `{ email_id?, reason, when: { in_days? \| date? \| weekday?, time? }, kind?, title?, document_id?, company_id? }` | `{ followup_id, execute_at }` — la date finale est **calculée côté serveur** | LOW |
+| `list_followups` | `{ scope: today \| upcoming \| pending_approval \| needs_attention \| all, kind?, max? }` | relances et rappels | LOW |
+| `postpone_followup` | `{ followup_id, when }` | nouvelle échéance (aucun doublon) | LOW |
+| `cancel_followup` | `{ followup_id, reason? }` | `{ followup_id, status }` | LOW |
+| `complete_reminder` | `{ followup_id }` | rappel interne marqué traité | LOW |
+| `prepare_followup_now` | `{ followup_id }` | vérifie Outlook puis prépare la relance (action à valider) ; n'envoie jamais | MEDIUM |
 | `check_reply_received` | `{ thread_id, since }` | `{ replied: boolean, reply_email_id? }` | LOW |
 
 ## Contacts et sociétés (`src/tools/contacts`)
@@ -100,7 +104,7 @@ C'est le **seul** tool de signature. Il vérifie les prérequis (`checkSignature
 |---|---|
 | `analyze` (worker) | lecture Outlook, documents, `schedule_followup`, création d'actions (reply/forward/payment/signature) |
 | `chat` (Chat EMA) | **lecture seule** — `get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `get_approval_status`, `search_documents`, `get_document`, `list_pending_actions` — plus `prepare_signed_document`, qui ne fait que proposer une action CRITICAL à valider (liste `CHAT_READONLY_TOOLS`, `src/agent/chat.ts`). Aucune action bancaire n'existe ; les actions à effet passent par l'Action Engine et la validation. |
-| `followup` (worker) | `get_email_thread`, `check_reply_received`, `reply_email`, `cancel_followup` |
+| `followup` (worker) | `get_email_thread`, `check_reply_received`, `reply_email`, `schedule_followup`, `list_followups`, `postpone_followup`, `cancel_followup`, `prepare_followup_now` |
 | `whatsapp` (assistant WhatsApp) | liste explicite `WHATSAPP_TOOLS` (`src/agent/whatsapp-assistant.ts`), dérivée du mode `chat` : **lecture** (`get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `search_documents`, `get_document`, `search_contacts`, `get_company`, `list_pending_actions`, `get_approval_status`, `get_today_summary`) et **préparation** (`reply_email`, `forward_email`, `send_email`, `prepare_document_forward`, `prepare_payment_request`, `prepare_deposit_request`, `prepare_signed_document`, `update_draft`). Chaque préparation crée une action soumise à validation ; aucune primitive d'envoi ou de signature n'est exposée. Détails : `docs/whatsapp-assistant.md`. |
 
 ## Contrat d'erreur

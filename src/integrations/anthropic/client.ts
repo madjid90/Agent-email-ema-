@@ -23,6 +23,11 @@ export function resetAnthropicClient(): void {
   client = null;
 }
 
+/** Injection d'un client (tests uniquement) : aucun appel réseau réel. */
+export function setAnthropicClientForTests(override: Anthropic | null): void {
+  client = override;
+}
+
 export interface ConnectionTestResult {
   ok: boolean;
   model: string;

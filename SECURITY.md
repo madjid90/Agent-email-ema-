@@ -42,6 +42,14 @@
 - Les numéros stockés dans `chat_messages` et `history` sont masqués ; le contenu des messages n'est jamais recopié dans les logs applicatifs.
 - `WHATSAPP_ASSISTANT_ENABLED=false` désactive la conversation sans désactiver les validations.
 
+## 4 ter. Relances (phase 7)
+
+- Aucune relance n'est envoyée sans validation humaine, et aucune n'est préparée sans avoir relu le thread dans Outlook. Graph indisponible = aucune supposition, aucune relance.
+- Les échéances sont calculées par le serveur ; le modèle ne fournit qu'une intention temporelle.
+- Le destinataire d'une relance vient du thread : aucune adresse n'est saisie par le modèle. L'envoi se fait en réponse dans la conversation existante.
+- Double exécution impossible : verrou de tâche, transition atomique de la relance, réutilisation du brouillon existant, dédoublonnage des événements Meta, transition `APPROVED → EXECUTING` de l'Action Engine.
+- Une notification proactive refusée par Meta n'est jamais considérée comme envoyée ; elle reste visible dans l'interface.
+
 ## 5. Webhooks
 
 - WhatsApp : vérification `hub.verify_token` à l'abonnement (comparaison en temps constant) ; vérification `X-Hub-Signature-256` (HMAC SHA-256 du corps brut avec `WHATSAPP_APP_SECRET`) sur chaque POST ; en production, webhook refusé (503) si le secret manque.

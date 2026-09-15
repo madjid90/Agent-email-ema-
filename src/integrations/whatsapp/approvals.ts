@@ -5,7 +5,8 @@ import * as approvalsRepo from "@/database/repositories/approvals";
 import * as emailsRepo from "@/database/repositories/emails";
 import { getLatestAnalysis } from "@/database/repositories/analyses";
 import { getDocument } from "@/database/repositories/documents";
-import { formatAmount } from "@/lib/time";
+import { formatAmount, formatDateTime } from "@/lib/time";
+import { getFollowup } from "@/database/repositories/followups";
 import { logHistory } from "@/database/repositories/history";
 import { claimWebhookEvent, setWebhookEventResult } from "@/database/repositories/webhook-events";
 import type { ActionRow, ApprovalRow } from "@/database/types";
@@ -68,6 +69,34 @@ export function buildApprovalMessageInput(action: ActionRow, approval: ApprovalR
   if (due) details.push({ label: "Échéance", value: due });
   if (doc?.possible_duplicate === 1) notes.push("doublon potentiel de facture");
   if (doc?.bank_details_change === 1) notes.push("changement de coordonnées bancaires détecté");
+  // Relance (phase 7) : même carte de validation, titre et détails dédiés.
+  const followupId = typeof payload.followup_id === "string" ? payload.followup_id : null;
+  if (followupId) {
+    const followup = getFollowup(followupId, db);
+    const tz = getSettings().company.timezone;
+    const followupDetails: { label: string; value: string }[] = [
+      { label: "Contact", value: followup?.recipient ?? email?.sender_name ?? email?.sender_email ?? "—" },
+      { label: "Sujet", value: email?.subject ?? action.title },
+      { label: "Dernier message envoyé", value: followup?.watch_after ? formatDateTime(followup.watch_after, tz) : "—" },
+      { label: "Réponse reçue", value: followup?.last_reply_email_id ? "Réponse automatique détectée" : "Aucune" },
+      { label: "Tentative", value: followup ? `${(typeof payload.attempt === "number" ? payload.attempt : followup.attempts + 1).toString()} / ${followup.max_attempts}` : "—" },
+    ];
+    return {
+      approvalId: approval.id,
+      kind: "followup_reply",
+      senderName: email?.sender_name ?? null,
+      senderEmail: email?.sender_email ?? null,
+      company: companyId ? companies.get(companyId) ?? companyId : null,
+      subject: email?.subject ?? action.title,
+      summary: followup?.reason ?? null,
+      proposedAction: "Envoyer la relance dans le thread Outlook",
+      proposedReply: approval.proposed_reply,
+      confidence: null,
+      humanReviewNote: notes.length ? notes.join(" — ") : null,
+      details: followupDetails,
+      note: null,
+    };
+  }
   const isPayment = action.type === "payment_request" || action.type === "deposit_request";
   if (action.type === "sign_document") {
     const p = payload as Record<string, unknown>;

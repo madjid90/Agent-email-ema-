@@ -95,10 +95,18 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ `WHATSAPP_ASSISTANT_ENABLED` + panneau Paramètres → WhatsApp ; `docs/whatsapp-assistant.md` ; 31 tests
 - ⏳ Reporté : réception de pièces jointes envoyées par WhatsApp, notifications spontanées
 
-## PHASE 7 — Relances ⏳
+## PHASE 7 — Relances intelligentes ✅
 
-- `scheduled_followups` complet : programmation, vérification de réponse, relance proposée, validation, envoi
-- Page Relances (Annuler / Reporter / Exécuter maintenant)
+- ✅ `scheduled_followups` étendu (migration `008_followups`) : type de suivi, ancrage `watch_after`, société/document, action générée, notifications, diagnostic ; machine d'état complète (13 statuts, transitions atomiques)
+- ✅ Échéances calculées côté serveur (`src/followups/schedule.ts`) : « dans 3 jours », « vendredi », « le 22 septembre », heure par défaut, jours ouvrés — le modèle n'exprime qu'une intention
+- ✅ Vérification Microsoft Graph obligatoire à l'échéance ; détection déterministe réponse humaine / automatique / ambiguë (`detect.ts`) ; message sortant plus récent → relance obsolète
+- ✅ Brouillon contextualisé (sortie structurée, ton adapté à la tentative) → action `reply_email` dans le thread → validation WhatsApp obligatoire → envoi par l'Action Engine → `SENT` (nouvel ancrage, tentative +1)
+- ✅ Report, annulation, `maxAttempts`, rappels internes (`INTERNAL_REMINDER` + boutons WhatsApp Terminé / Reporter)
+- ✅ Notifications proactives : dédoublonnées, template Meta hors fenêtre de 24 h, jamais « envoyées » si Meta refuse
+- ✅ Tools `list_followups`, `postpone_followup`, `prepare_followup_now`, `complete_reminder` ; pilotage WhatsApp avec références multi-tours
+- ✅ Page Relances complète (À traiter, À valider, Aujourd'hui, À venir, Envoyées, Annulées) et compteurs sur Aujourd'hui
+- ✅ Worker sous verrou, reprise après interruption, `docs/followups.md`, 34 tests
+- ⏳ Reporté : jours fériés, relances récurrentes automatiques après envoi
 
 ## PHASE 8 — VPS ⏳
 

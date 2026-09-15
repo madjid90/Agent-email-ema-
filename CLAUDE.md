@@ -42,7 +42,7 @@ Outlook → Microsoft Graph → EMA (worker) → Contexte (thread + règles + so
       → WhatsApp (validation) → Exécution → Outlook / Documents → Historique
 ```
 
-Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`. Devis / signature : `docs/signatures.md`. Assistant WhatsApp : `docs/whatsapp-assistant.md`.
+Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`. Devis / signature : `docs/signatures.md`. Assistant WhatsApp : `docs/whatsapp-assistant.md`. Relances : `docs/followups.md`.
 
 ## 4. Structure du projet
 
@@ -130,6 +130,17 @@ tests/            vitest
 - Action `sign_document` = `CRITICAL`, jamais abaissable, une seule validation, une seule exécution ; un nouvel essai réutilise la copie signée existante. PDF chiffré/corrompu → `FAILED`, jamais contourné.
 - Un seul tool : `prepare_signed_document({ document_id, company_id })`. Aucun tool d'application de signature/tampon n'existe pour Claude.
 - Toujours parler de « signature enregistrée » / « signature graphique » : jamais de signature électronique qualifiée, eIDAS ou cryptographique.
+
+## 10 bis. Règles relances et rappels (phase 7)
+
+- Une relance mémorise le thread surveillé et son ancrage `watch_after` (dernier message sortant) ; seuls les messages postérieurs comptent comme réponse.
+- À l'échéance : **vérification Microsoft Graph obligatoire** avant toute rédaction. Graph indisponible, Outlook déconnecté ou thread introuvable → nouvelle tentative plus tard, jamais de relance envoyée ni préparée.
+- Réponse humaine → annulation automatique ; réponse automatique → report ; réponse ambiguë → vérification humaine ; message sortant plus récent → relance obsolète.
+- Sans réponse : brouillon Claude → action `reply_email` dans le thread → **validation obligatoire** (V1 : sans exception, `settings.followups.requireApproval` vaut toujours `true`).
+- Les échéances sont calculées côté serveur (`resolveFollowupDate`, fuseau du client, heure par défaut) : Claude n'exprime qu'une intention (`in_days`, `date`, `weekday`, `time`).
+- `settings.followups.maxAttempts` respecté : au-delà, suivi suspendu et décision humaine demandée, jamais d'envoi automatique.
+- Rappel interne (`INTERNAL_REMINDER`) : notification WhatsApp uniquement, aucun email.
+- Idempotence : verrou de tâche, transition atomique `SCHEDULED → CHECKING`, réutilisation du brouillon existant, notification jamais renvoyée après un redémarrage.
 
 ## 11. Commandes
 

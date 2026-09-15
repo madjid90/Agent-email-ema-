@@ -8,6 +8,7 @@ import { claimWebhookEvent, setWebhookEventResult } from "@/database/repositorie
 import type { ActionRow } from "@/database/types";
 import { getApproverPhone, getEnv } from "@/lib/env";
 import { getSettings, type Settings } from "@/lib/config";
+import { formatDateTime } from "@/lib/time";
 import { EmaError } from "@/lib/errors";
 import { createLogger } from "@/lib/logger";
 import { approveAndExecute, rejectAction } from "@/actions/engine";
@@ -17,7 +18,9 @@ import { runWhatsappAssistantTurn } from "@/agent/whatsapp-assistant";
 import { getWhatsappClient, isWhatsappConfigured, type WhatsappClient } from "./client";
 import { textMessage } from "./messages";
 import { handleInboundEvent, maskPhone, notifyPendingApproval } from "./approvals";
-import { parseButtonId } from "./webhook";
+import { parseButtonId, parseReminderButtonId } from "./webhook";
+import { completeReminder, postponeFollowup } from "@/followups/service";
+import { getFollowup } from "@/database/repositories/followups";
 import type { WhatsappInboundEvent } from "./types";
 
 const log = createLogger("whatsapp.router");
@@ -31,7 +34,7 @@ const log = createLogger("whatsapp.router");
  * Ordre invariant : numéro autorisé → dédoublonnage → routage. Rien n'est
  * envoyé à Claude avant ces deux contrôles.
  */
-export type WhatsappRoute = "APPROVAL_INTERACTION" | "CHAT_MESSAGE" | "IGNORED";
+export type WhatsappRoute = "APPROVAL_INTERACTION" | "REMINDER_INTERACTION" | "CHAT_MESSAGE" | "IGNORED";
 
 export interface RouterDeps {
   db?: Db;
@@ -55,6 +58,7 @@ export const NO_LLM_REPLY = "Je n'ai pas pu traiter ta demande. Aucun email ni d
 /** Classement d'un événement entrant, sans effet de bord. */
 export function classifyEvent(event: WhatsappInboundEvent): WhatsappRoute {
   if (parseButtonId(event.buttonId)) return "APPROVAL_INTERACTION";
+  if (parseReminderButtonId(event.buttonId)) return "REMINDER_INTERACTION";
   if (event.kind === "text" && (event.text ?? "").trim().length > 0) return "CHAT_MESSAGE";
   return "IGNORED";
 }
@@ -153,6 +157,35 @@ export async function handleWhatsappEvent(event: WhatsappInboundEvent, deps: Rou
   if (route === "APPROVAL_INTERACTION") {
     const r = await handleInboundEvent(event, { db, settings, client: deps.client, approverPhone: approver });
     return { route, outcome: r.outcome, actionIds: r.actionId ? [r.actionId] : [], reply: null };
+  }
+  // Boutons d'un rappel interne : terminé / reporter. Aucun email n'est impliqué.
+  if (route === "REMINDER_INTERACTION") {
+    const button = parseReminderButtonId(event.buttonId);
+    if (!button) return { route, outcome: "ignored", actionIds: [], reply: null };
+    if (!claimWebhookEvent({ provider: "whatsapp", externalId: event.messageId, eventType: "reminder", sender: maskPhone(event.from) }, db)) {
+      return { route, outcome: "duplicate", actionIds: [], reply: null };
+    }
+    const followup = getFollowup(button.followupId, db);
+    if (!followup) {
+      await send(deps, approver, "⚠️ Rappel introuvable.");
+      return { route, outcome: "unknown", actionIds: [], reply: null };
+    }
+    try {
+      if (button.decision === "done") {
+        completeReminder(button.followupId, { db, settings, actor: "whatsapp" });
+        await send(deps, approver, `✅ Rappel terminé : ${followup.title ?? followup.reason}`);
+        setWebhookEventResult("whatsapp", event.messageId, "reminder_done", db);
+        return { route, outcome: "reminder_done", actionIds: [], reply: null };
+      }
+      const updated = postponeFollowup(button.followupId, { in_days: 1 }, { db, settings, actor: "whatsapp" });
+      await send(deps, approver, `⏭ Rappel reporté au ${formatDateTime(updated.execute_at, settings.company.timezone)}.`);
+      setWebhookEventResult("whatsapp", event.messageId, "reminder_snoozed", db);
+      return { route, outcome: "reminder_snoozed", actionIds: [], reply: null };
+    } catch (err) {
+      await send(deps, approver, `⚠️ ${err instanceof Error ? err.message : "Erreur"}`);
+      setWebhookEventResult("whatsapp", event.messageId, "error", db);
+      return { route, outcome: "already_decided", actionIds: [], reply: null };
+    }
   }
   if (route === "IGNORED") return { route, outcome: "ignored", actionIds: [], reply: null };
 
