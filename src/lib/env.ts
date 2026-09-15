@@ -6,6 +6,8 @@ import { z } from "zod";
  * appelé depuis src/integrations/* ou src/security/*.
  */
 const optionalString = z.string().trim().optional().transform((v) => (v && v.length > 0 ? v : undefined));
+/** Booléen d'environnement : absent ou vide = valeur par défaut ; "false"/"0"/"no"/"off" = faux. */
+const optionalBool = (fallback: boolean) => z.string().trim().optional().transform((v) => (v === undefined || v.length === 0 ? fallback : !/^(false|0|no|off)$/i.test(v)));
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -27,6 +29,8 @@ const envSchema = z.object({
   /** Ancien nom (phase 0), accepté comme alias de WHATSAPP_APPROVER_PHONE. */
   WHATSAPP_RECIPIENT_NUMBER: optionalString,
   WHATSAPP_API_VERSION: z.string().trim().default("v21.0"),
+  /** Assistant conversationnel WhatsApp (phase 6). À false : seules les validations fonctionnent. */
+  WHATSAPP_ASSISTANT_ENABLED: optionalBool(true),
 
   APP_URL: z.string().trim().default("http://localhost:3000"),
   APP_SECRET: optionalString,

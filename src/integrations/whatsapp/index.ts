@@ -10,6 +10,7 @@ export { WhatsappClient, WhatsappError, getWhatsappClient, isWhatsappConfigured,
 export { verifySubscription, verifySignature, parseWebhook, parseButtonId } from "./webhook";
 export { buildApprovalMessages, formatApprovalBody, textMessage, TEST_MESSAGE } from "./messages";
 export { notifyPendingApproval, notifyUnsentApprovals, handleInboundEvent, maskPhone, MAX_NOTIFY_ATTEMPTS } from "./approvals";
+export { handleWhatsappEvent, classifyEvent, parseNaturalDecision, NO_LLM_REPLY, type WhatsappRoute, type RouterResult } from "./router";
 export type { WhatsappInboundEvent } from "./types";
 
 export interface WhatsappStatus {
@@ -23,6 +24,8 @@ export interface WhatsappStatus {
   lastTestAt: string | null;
   lastTestResult: string | null;
   webhookPath: string;
+  /** Assistant conversationnel (phase 6) : pilotage d'EMA depuis WhatsApp. */
+  assistantEnabled: boolean;
 }
 
 export function getWhatsappStatus(): WhatsappStatus {
@@ -39,6 +42,7 @@ export function getWhatsappStatus(): WhatsappStatus {
     lastTestAt: kvGet("whatsapp.last_test_at") || null,
     lastTestResult: kvGet("whatsapp.last_test_result") || null,
     webhookPath: "/api/integrations/whatsapp/webhook",
+    assistantEnabled: env.WHATSAPP_ASSISTANT_ENABLED,
   };
 }
 

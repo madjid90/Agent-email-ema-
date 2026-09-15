@@ -42,7 +42,7 @@ Outlook → Microsoft Graph → EMA (worker) → Contexte (thread + règles + so
       → WhatsApp (validation) → Exécution → Outlook / Documents → Historique
 ```
 
-Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`. Devis / signature : `docs/signatures.md`.
+Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`. Devis / signature : `docs/signatures.md`. Assistant WhatsApp : `docs/whatsapp-assistant.md`.
 
 ## 4. Structure du projet
 
@@ -117,6 +117,10 @@ tests/            vitest
 - Une demande expire après `settings.approvals.expireAfterHours` → statut `EXPIRED` ; l'action reste `WAITING_APPROVAL`, jamais exécutée sans décision (renvoi possible depuis l'interface).
 - Une seule demande active par action : pas de renvoi tant qu'une demande `PENDING` a été notifiée.
 - Ne jamais envoyer de secret ou de pièce jointe brute sur WhatsApp ; uniquement résumé, montant, société, action proposée, réponse proposée.
+- **Assistant WhatsApp (phase 6)** : les messages texte du numéro autorisé sont routés par `src/integrations/whatsapp/router.ts` vers le Chat EMA (canal `WHATSAPP`). Ordre invariant : numéro autorisé → assistant activé (`WHATSAPP_ASSISTANT_ENABLED`) → dédoublonnage → routage. Rien n'est lu ni envoyé à Claude avant ces contrôles.
+- L'assistant ne peut que **lire** et **préparer** : chaque outil de préparation crée une action dans l'Action Engine, validée ensuite. Aucun appel direct à Graph, aucun tool d'approbation, aucun moyen de désactiver une validation.
+- Validation en langage naturel (« valide », « annule ») : détection déterministe et stricte, appliquée uniquement si une action attend réellement une décision ; plusieurs actions → désambiguïsation numérotée. Les boutons restent la méthode de référence.
+- La conversation WhatsApp vit dans `chat_messages` (canal, identifiant Meta, expéditeur **masqué**, références numérotées) : aucune autre base mémoire. Contexte borné : derniers messages, actions en attente, références.
 
 ## 10. Règles signatures graphiques / tampons
 

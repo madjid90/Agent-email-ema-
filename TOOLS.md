@@ -44,6 +44,7 @@ defineTool({
 | `search_documents` | `{ query?, supplier?, invoice_number?, document_type?, since?, requires_review?, possible_duplicate?, max? }` | documents archivés | LOW |
 | `get_document` | `{ document_id }` | détail + données extraites | LOW |
 | `list_pending_actions` | `{ max? }` | actions en attente de validation | LOW |
+| `prepare_document_forward` | `{ document_id, comment? }` | `{ action_id, to, rule_id }` — destinataire issu de `config/rules.json` puis des contacts internes, jamais choisi par le modèle | MEDIUM |
 
 ## Paiements (`src/tools/payments`)
 
@@ -62,12 +63,20 @@ Ces tools ne paient jamais : ils préparent un email interne et créent une acti
 | `cancel_followup` | `{ followup_id, reason? }` | `{ ok }` | LOW |
 | `check_reply_received` | `{ thread_id, since }` | `{ replied: boolean, reply_email_id? }` | LOW |
 
+## Contacts et sociétés (`src/tools/contacts`)
+
+| Tool | Entrée | Sortie | Risque |
+|---|---|---|---|
+| `search_contacts` | `{ query, internal_only?, max? }` | candidats issus de `config/contacts.json` puis des expéditeurs déjà reçus (0, 1 ou plusieurs) — aucune adresse inventée | LOW |
+| `get_company` | `{ company_id?, query? }` | sociétés configurées, signataire, `signature_available` / `stamp_available` — **jamais** de chemin ni d'image | LOW |
+
 ## Validations (`src/tools/approvals`)
 
 | Tool | Entrée | Sortie | Risque |
 |---|---|---|---|
 | `request_approval` | `{ action_id, summary, proposed_reply? }` | `{ approval_id }` | LOW (envoi WhatsApp) |
 | `get_approval_status` | `{ approval_id }` | `{ status, decided_at?, comment? }` | LOW |
+| `update_draft` | `{ action_id, body, subject? }` | brouillon modifié — texte et objet uniquement : destinataires, niveau de risque et statut restent inchangés | LOW |
 
 ## Signatures (`src/tools/signatures`)
 
@@ -83,6 +92,7 @@ C'est le **seul** tool de signature. Il vérifie les prérequis (`checkSignature
 |---|---|---|---|
 | `get_email_analysis` | `{ email_id }` | analyse EMA (catégorie, urgence, résumé, société, montant, action recommandée, brouillon) | LOW |
 | `list_recent_emails` | `{ max?, category?, needs_reply?, since? }` | emails récents avec leur analyse | LOW |
+| `get_today_summary` | `{ since? }` | compteurs du jour (urgents, à répondre, à valider, factures, devis à signer, demandes de paiement) et principaux éléments | LOW |
 
 ## Modes d'exposition
 
@@ -91,6 +101,7 @@ C'est le **seul** tool de signature. Il vérifie les prérequis (`checkSignature
 | `analyze` (worker) | lecture Outlook, documents, `schedule_followup`, création d'actions (reply/forward/payment/signature) |
 | `chat` (Chat EMA) | **lecture seule** — `get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `get_approval_status`, `search_documents`, `get_document`, `list_pending_actions` — plus `prepare_signed_document`, qui ne fait que proposer une action CRITICAL à valider (liste `CHAT_READONLY_TOOLS`, `src/agent/chat.ts`). Aucune action bancaire n'existe ; les actions à effet passent par l'Action Engine et la validation. |
 | `followup` (worker) | `get_email_thread`, `check_reply_received`, `reply_email`, `cancel_followup` |
+| `whatsapp` (assistant WhatsApp) | liste explicite `WHATSAPP_TOOLS` (`src/agent/whatsapp-assistant.ts`), dérivée du mode `chat` : **lecture** (`get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `search_documents`, `get_document`, `search_contacts`, `get_company`, `list_pending_actions`, `get_approval_status`, `get_today_summary`) et **préparation** (`reply_email`, `forward_email`, `send_email`, `prepare_document_forward`, `prepare_payment_request`, `prepare_deposit_request`, `prepare_signed_document`, `update_draft`). Chaque préparation crée une action soumise à validation ; aucune primitive d'envoi ou de signature n'est exposée. Détails : `docs/whatsapp-assistant.md`. |
 
 ## Contrat d'erreur
 

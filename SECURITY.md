@@ -34,6 +34,14 @@
 - Expiration automatique (`settings.approvals.expireAfterHours`).
 - Idempotence : `UPDATE actions SET status='EXECUTING' WHERE id=? AND status='APPROVED'` doit modifier exactement 1 ligne avant tout effet de bord.
 
+## 4 bis. Pilotage depuis WhatsApp (phase 6)
+
+- Seul `WHATSAPP_APPROVER_PHONE` peut dialoguer avec EMA. Tout autre numéro est ignoré **avant** toute lecture de données et tout appel au modèle ; seul un log au numéro masqué est écrit, sans le contenu du message.
+- L'assistant ne dispose que d'outils de lecture et de préparation : chaque action passe par l'Action Engine et sa validation. Aucun outil n'approuve une action, ne modifie un niveau de risque ni n'appelle Microsoft Graph.
+- `update_draft` ne modifie que le texte et l'objet d'un brouillon : les destinataires restent ceux résolus par les règles et les contacts.
+- Les numéros stockés dans `chat_messages` et `history` sont masqués ; le contenu des messages n'est jamais recopié dans les logs applicatifs.
+- `WHATSAPP_ASSISTANT_ENABLED=false` désactive la conversation sans désactiver les validations.
+
 ## 5. Webhooks
 
 - WhatsApp : vérification `hub.verify_token` à l'abonnement (comparaison en temps constant) ; vérification `X-Hub-Signature-256` (HMAC SHA-256 du corps brut avec `WHATSAPP_APP_SECRET`) sur chaque POST ; en production, webhook refusé (503) si le secret manque.

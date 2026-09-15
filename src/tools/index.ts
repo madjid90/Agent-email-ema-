@@ -7,6 +7,7 @@ import { approvalTools } from "./approvals";
 import { signatureTools } from "./signatures";
 import { whatsappTools } from "./whatsapp";
 import { analysisTools } from "./analysis";
+import { contactTools } from "./contacts";
 
 let ready = false;
 
@@ -14,7 +15,7 @@ let ready = false;
 export function registerAllTools(): void {
   if (ready) return;
   clearTools();
-  registerTools([...outlookTools, ...documentTools, ...paymentTools, ...followupTools, ...approvalTools, ...signatureTools, ...whatsappTools, ...analysisTools]);
+  registerTools([...outlookTools, ...documentTools, ...paymentTools, ...followupTools, ...approvalTools, ...signatureTools, ...whatsappTools, ...analysisTools, ...contactTools]);
   ready = true;
 }
 

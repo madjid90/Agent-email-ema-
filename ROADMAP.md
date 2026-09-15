@@ -83,12 +83,24 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Migration `006_signatures`, `docs/signatures.md`, 19 tests
 - ⏳ Reporté : upload de signature/tampon depuis l'interface (dépôt manuel dans `private/` pour l'instant)
 
-## PHASE 6 — Relances ⏳
+## PHASE 6 — Pilotage complet d'EMA depuis WhatsApp ✅
+
+- ✅ WhatsApp Router (`src/integrations/whatsapp/router.ts`) : numéro autorisé → assistant activé → dédoublonnage Meta → boutons (service d'approbations phase 3) ou texte (assistant). Webhook, client et approbations réutilisés tels quels.
+- ✅ Assistant conversationnel (`src/agent/whatsapp-assistant.ts`) réutilisant le Chat EMA : lecture / préparation / action, sans commandes à retenir
+- ✅ Outils explicites : lecture (emails, documents, contacts, sociétés, actions, point du jour) et préparation (`reply_email`, `send_email`, `forward_email`, `prepare_document_forward`, `prepare_payment_request`, `prepare_deposit_request`, `prepare_signed_document`, `update_draft`) — chacun crée une action soumise à validation
+- ✅ Nouveaux tools `search_contacts`, `get_company`, `get_today_summary`, `update_draft`, `prepare_document_forward`
+- ✅ Mémoire multi-tours dans `chat_messages` (migration `007_whatsapp_chat` : canal, identifiant Meta, expéditeur masqué, références numérotées) — « le premier », « le deuxième », « réponds-lui »
+- ✅ Validation en langage naturel déterministe (« valide », « annule ») avec désambiguïsation quand plusieurs actions sont en attente ; boutons inchangés
+- ✅ Modification d'un brouillon depuis WhatsApp (`update_draft` → `editActionPayload`, tracée dans `history`)
+- ✅ `WHATSAPP_ASSISTANT_ENABLED` + panneau Paramètres → WhatsApp ; `docs/whatsapp-assistant.md` ; 31 tests
+- ⏳ Reporté : réception de pièces jointes envoyées par WhatsApp, notifications spontanées
+
+## PHASE 7 — Relances ⏳
 
 - `scheduled_followups` complet : programmation, vérification de réponse, relance proposée, validation, envoi
 - Page Relances (Annuler / Reporter / Exécuter maintenant)
 
-## PHASE 7 — VPS ⏳
+## PHASE 8 — VPS ⏳
 
 - Procédure de déploiement validée sur Ubuntu (PM2, Nginx, SSL)
 - Sauvegarde / restauration testées

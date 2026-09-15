@@ -10,6 +10,12 @@ import { ensureDocumentText } from "@/documents/extract-text";
 import { analyzeDocument, readExtraction } from "@/documents/analyze";
 import { classifyDocumentHeuristic } from "@/documents/classify";
 import { documentTypeSchema, DOCUMENT_TYPE_LABELS, type DuplicateMatch } from "@/documents/types";
+import { getLatestAnalysis } from "@/database/repositories/analyses";
+import { evaluateRules } from "@/agent/rules";
+import { resolvePaymentRecipient } from "@/documents/routing";
+import { proposeAction } from "@/actions/engine";
+import { actionRefSchema } from "../types";
+import { formatAmount } from "@/lib/time";
 
 function requireDoc(id: string, db: Parameters<typeof documentsRepo.getDocument>[1]): DocumentRow {
   const d = documentsRepo.getDocument(id, db);
@@ -178,4 +184,50 @@ export const listPendingActions = defineTool({
     listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: input.max }, ctx.db).map((a) => ({ action_id: a.id, type: a.type, title: a.title, status: a.status, risk_level: a.risk_level, email_id: a.source_email_id, document_id: a.document_id, created_at: a.created_at })),
 });
 
-export const documentTools = [extractPdfText, classifyDocument, extractInvoiceData, extractQuoteData, archiveDocument, searchDocuments, getDocument, listPendingActions];
+export const prepareDocumentForward = defineTool({
+  name: "prepare_document_forward",
+  description: "Prépare le transfert d'un document (facture, avoir…) à la personne désignée par les règles de routage. Le destinataire est déterminé par config/rules.json puis par les contacts internes : il n'est jamais choisi librement. Crée une action à valider.",
+  riskLevel: "MEDIUM",
+  modes: ["chat"],
+  input: z.object({ document_id: z.string(), comment: z.string().optional() }),
+  output: actionRefSchema.extend({ to: z.array(z.string()), rule_id: z.string().nullable(), comment: z.string() }),
+  handler: async (input, ctx) => {
+    const d = requireDoc(input.document_id, ctx.db);
+    if (!d.email_id) throw new EmaError("VALIDATION", "Ce document n'est rattaché à aucun email : transfert impossible");
+    const email = emailsRepo.getEmail(d.email_id, ctx.db);
+    if (!email) throw new EmaError("NOT_FOUND", `Email ${d.email_id} introuvable`);
+    if (d.bank_details_change === 1) throw new EmaError("VALIDATION", "Changement de coordonnées bancaires détecté : vérification humaine requise avant tout transfert");
+    const analysis = getLatestAnalysis(email.id, ctx.db);
+    const outcome = evaluateRules(ctx.rules, {
+      category: (analysis?.category as Parameters<typeof evaluateRules>[1]["category"]) ?? null,
+      supplier: d.supplier_name ?? analysis?.company_name ?? null,
+      senderEmail: email.sender_email,
+      subject: email.subject,
+      companyId: d.company_id ?? analysis?.company_id ?? null,
+      amount: d.amount_incl_tax ?? analysis?.amount_value ?? null,
+    });
+    const to = outcome.forwardTo ?? resolvePaymentRecipient(outcome, ctx.contacts);
+    if (!to) throw new EmaError("CONFIG", "Aucune règle ni contact interne ne désigne de destinataire pour ce document : ajoutez une règle dans config/rules.json");
+    const amount = d.amount_incl_tax !== null ? ` (${formatAmount(d.amount_incl_tax, d.currency ?? "EUR")} TTC)` : "";
+    const comment =
+      input.comment ??
+      ["Bonjour,", "", `Pouvez-vous prendre en charge ce document${d.supplier_name ? ` ${d.supplier_name}` : ""}${d.invoice_number ? ` n° ${d.invoice_number}` : ""}${amount}${d.due_date ? `, échéance ${d.due_date}` : ""} ?`, "", "Merci.", "", ctx.settings.agent.signatureText].join("\n").trim();
+    const a = proposeAction(
+      {
+        type: "forward_email",
+        title: `Transférer ${d.supplier_name ?? d.name}${d.invoice_number ? ` n° ${d.invoice_number}` : ""} à ${to}`,
+        payload: { email_id: email.id, to: [to], comment },
+        sourceEmailId: email.id,
+        documentId: d.id,
+        companyId: d.company_id,
+        requiresApproval: true,
+        actor: "user",
+      },
+      { db: ctx.db, settings: ctx.settings },
+    );
+    logHistory({ eventType: "rule.applied", message: `Transfert préparé vers ${to}${outcome.forwardRule ? ` (règle ${outcome.forwardRule.id})` : " (contact interne)"}`, actor: "user", actionId: a.id, emailId: email.id, documentId: d.id }, ctx.db);
+    return { action_id: a.id, status: a.status, requires_approval: a.requires_approval === 1, to: [to], rule_id: outcome.forwardRule?.id ?? null, comment };
+  },
+});
+
+export const documentTools = [extractPdfText, classifyDocument, extractInvoiceData, extractQuoteData, archiveDocument, searchDocuments, getDocument, listPendingActions, prepareDocumentForward];

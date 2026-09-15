@@ -14,6 +14,7 @@ export interface WhatsappPanelStatus {
   lastTestAt: string | null;
   lastTestResult: string | null;
   webhookPath: string;
+  assistantEnabled: boolean;
 }
 
 export function WhatsappPanel({ status, appUrl }: { status: WhatsappPanelStatus; appUrl: string }) {
@@ -55,9 +56,23 @@ export function WhatsappPanel({ status, appUrl }: { status: WhatsappPanelStatus;
       ) : (
         <div className="alert warn">Variables manquantes dans <code>.env</code> : {missing.map((m) => <code key={m} style={{ marginRight: "0.4rem" }}>{m}</code>)}. Seul le numéro autorisé peut valider les actions.</div>
       )}
+      <div className={`alert ${status.assistantEnabled && status.configured ? "ok" : "warn"}`} style={{ marginTop: "0.75rem" }}>
+        <strong>{status.assistantEnabled ? "✅ Assistant WhatsApp activé" : "⏸ Assistant WhatsApp désactivé"}</strong>
+        {status.assistantEnabled ? (
+          <div className="form-grid" style={{ marginTop: "0.5rem" }}>
+            <p><span className="muted">Numéro autorisé :</span> {status.approverPhone ?? "—"} — seul ce numéro peut écrire à EMA.</p>
+            <p className="muted">Vous pouvez désormais utiliser EMA directement depuis WhatsApp : poser une question, faire rédiger un email, préparer un transfert ou une signature. Chaque action reste soumise à validation.</p>
+            <p className="muted">{"Exemples : « Qu'est-ce que j'ai d'important aujourd'hui ? » · « Réponds à Kevin que mardi me convient. » · « Quels devis dois-je signer ? »"}</p>
+          </div>
+        ) : (
+          <p className="muted" style={{ marginTop: "0.5rem" }}>
+            <code>WHATSAPP_ASSISTANT_ENABLED=false</code> : les messages texte sont ignorés. Les validations par boutons continuent de fonctionner.
+          </p>
+        )}
+      </div>
       {msg ? <div className={`alert ${msg.tone}`}>{msg.text}</div> : null}
       <div className="row">
-        <button className="btn primary" disabled={busy || !status.configured} onClick={() => void test()}>{busy ? "Envoi…" : "Test notification"}</button>
+        <button className="btn primary" disabled={busy || !status.configured} onClick={() => void test()}>{busy ? "Envoi…" : "Envoyer un message test"}</button>
       </div>
     </div>
   );

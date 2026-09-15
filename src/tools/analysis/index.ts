@@ -5,6 +5,10 @@ import { listEmailsWithAnalysis } from "@/database/repositories/analyses";
 import { describeAnalysis } from "@/agent/chat";
 import { parseJson } from "@/database/types";
 import { EmaError } from "@/lib/errors";
+import { analysisStats } from "@/database/repositories/analyses";
+import { listActions } from "@/database/repositories/actions";
+import { searchDocuments } from "@/database/repositories/documents";
+import { startOfTodayIso } from "@/lib/time";
 
 /** Tools de lecture des analyses EMA (chat). Aucun effet de bord. */
 export const getEmailAnalysis = defineTool({
@@ -65,4 +69,44 @@ export const listRecentEmails = defineTool({
   },
 });
 
-export const analysisTools = [getEmailAnalysis, listRecentEmails];
+export const getTodaySummary = defineTool({
+  name: "get_today_summary",
+  description: "Point de la journée : compteurs (urgents, à répondre, à valider, factures, devis à signer, demandes de paiement) et principaux éléments. Données locales uniquement.",
+  riskLevel: "LOW",
+  modes: ["chat"],
+  input: z.object({ since: z.string().optional().describe("Date ISO de début (défaut : aujourd'hui)") }),
+  output: z.object({
+    since: z.string(),
+    counters: z.object({ urgent: z.number(), needs_reply: z.number(), pending_approval: z.number(), invoices: z.number(), quotes_to_sign: z.number(), payment_requests: z.number(), human_review: z.number() }),
+    urgent_emails: z.array(z.object({ email_id: z.string(), subject: z.string(), from: z.string().nullable(), summary: z.string().nullable() })),
+    pending_actions: z.array(z.object({ action_id: z.string(), type: z.string(), title: z.string(), risk_level: z.string() })),
+    quotes_to_sign: z.array(z.object({ document_id: z.string(), supplier_name: z.string().nullable(), quote_number: z.string().nullable(), amount_incl_tax: z.number().nullable(), company_id: z.string().nullable() })),
+  }),
+  handler: async (input, ctx) => {
+    const since = input.since ?? startOfTodayIso();
+    const stats = analysisStats(since, ctx.db);
+    const pending = listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 20 }, ctx.db);
+    const quotes = searchDocuments({ docType: "QUOTE", limit: 10 }, ctx.db).filter((d) => d.signed_document_id === null);
+    const emails = listEmailsWithAnalysis({ since, limit: 50 }, ctx.db);
+    return {
+      since,
+      counters: {
+        urgent: stats.urgent,
+        needs_reply: stats.needsReply,
+        pending_approval: pending.length,
+        invoices: stats.invoices,
+        quotes_to_sign: quotes.length,
+        payment_requests: pending.filter((a) => a.type === "payment_request" || a.type === "deposit_request").length,
+        human_review: stats.humanReview,
+      },
+      urgent_emails: emails
+        .filter((e) => e.urgency === "HIGH" || e.urgency === "CRITICAL" || e.category === "URGENT")
+        .slice(0, 5)
+        .map((e) => ({ email_id: e.email_id, subject: e.subject, from: e.sender_name ?? e.sender_email, summary: e.summary })),
+      pending_actions: pending.slice(0, 10).map((a) => ({ action_id: a.id, type: a.type, title: a.title, risk_level: a.risk_level })),
+      quotes_to_sign: quotes.map((d) => ({ document_id: d.id, supplier_name: d.supplier_name, quote_number: d.quote_number, amount_incl_tax: d.amount_incl_tax, company_id: d.company_id })),
+    };
+  },
+});
+
+export const analysisTools = [getEmailAnalysis, listRecentEmails, getTodaySummary];

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { bootstrap } from "@/lib/bootstrap";
 import { getEnv } from "@/lib/env";
 import { createLogger } from "@/lib/logger";
-import { handleInboundEvent, parseWebhook, verifySignature, verifySubscription } from "@/integrations/whatsapp";
+import { handleWhatsappEvent, parseWebhook, verifySignature, verifySubscription } from "@/integrations/whatsapp";
 
 const log = createLogger("whatsapp.webhook");
 
@@ -42,7 +42,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const results: string[] = [];
   for (const event of events) {
     try {
-      const r = await handleInboundEvent(event);
+      const r = await handleWhatsappEvent(event);
       results.push(r.outcome);
     } catch (err) {
       log.error("webhook event failed", { message: err instanceof Error ? err.message : String(err) });

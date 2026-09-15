@@ -134,6 +134,14 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 - `src/actions/executors/signing.ts` : exécuteur `sign_document` — copie signée → réponse dans le thread (`/reply`) avec le seul PDF signé → statuts `signed_and_sent` / `sent` → `history`.
 - Claude ne voit que `company_id` et des libellés logiques ; un seul tool `prepare_signed_document` (crée l'action) ; `apply_signature` / `apply_stamp` n'existent pas comme tools. Détails : `docs/signatures.md`.
 
-## 9. Déploiement
+## 9. Assistant WhatsApp (Phase 6)
+
+- `src/integrations/whatsapp/router.ts` : point d'entrée unique du webhook. Ordre invariant — numéro autorisé → assistant activé (`WHATSAPP_ASSISTANT_ENABLED`) → dédoublonnage `webhook_events` → routage `APPROVAL_INTERACTION` (service d'approbations phase 3) ou `CHAT_MESSAGE`.
+- Décision en langage naturel (`parseNaturalDecision`) : déterministe, appliquée via l'Action Engine uniquement si une action attend une décision ; plusieurs actions → liste numérotée et désambiguïsation.
+- `src/agent/whatsapp-assistant.ts` : tour de conversation réutilisant `runChatTurn` (canal `WHATSAPP`), liste d'outils explicite, contexte borné (8 derniers messages, actions en attente, références).
+- `src/agent/references.ts` : références numérotées enregistrées avec la réponse (`chat_messages.refs`) pour résoudre « le premier », « le deuxième », « réponds-lui ».
+- Après une préparation, le routeur envoie la réponse courte puis la carte de validation habituelle (`notifyPendingApproval`). Détails : `docs/whatsapp-assistant.md`.
+
+## 10. Déploiement
 
 Ubuntu VPS : Node 20+, PM2 (`ema-web`, `ema-worker`), Nginx reverse proxy, Certbot HTTPS. Voir `docs/deployment.md`.

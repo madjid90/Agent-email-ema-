@@ -2,6 +2,24 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [0.7.0] — Phase 6 — Pilotage complet d'EMA depuis WhatsApp — 2026-09-15
+
+### Ajouté
+- **WhatsApp Router** (`src/integrations/whatsapp/router.ts`) : point d'entrée unique du webhook — numéro autorisé → assistant activé → dédoublonnage Meta → boutons (service d'approbations phase 3, inchangé) ou messages texte (assistant conversationnel).
+- **Assistant WhatsApp** (`src/agent/whatsapp-assistant.ts`) réutilisant le Chat EMA : lecture (questions sur emails, documents, contacts, sociétés, actions, point du jour), préparation (brouillons) et action (via l'Action Engine). Aucune commande à retenir.
+- Liste d'outils explicite `WHATSAPP_TOOLS` : 12 outils de lecture et 8 outils de préparation ; aucune primitive d'envoi, de signature ou d'approbation n'est exposée.
+- Nouveaux tools : `search_contacts` (contacts configurés puis expéditeurs reçus, aucune adresse inventée), `get_company` (disponibilité de la signature/du tampon, jamais de chemin), `get_today_summary` (compteurs du jour), `update_draft` (modification du texte d'un brouillon en attente), `prepare_document_forward` (transfert d'un document au destinataire désigné par `config/rules.json`).
+- Mémoire conversationnelle multi-tours dans `chat_messages` (migration `007_whatsapp_chat` : `channel`, `external_id`, `sender` masqué, `refs`, `email_id`, `document_id`, `action_id`) et module `src/agent/references.ts` — résolution de « le premier », « le deuxième », « réponds-lui ».
+- Validation en langage naturel déterministe (« valide », « oui envoie », « annule », « refuse ») appliquée uniquement quand une action attend une décision ; plusieurs actions en attente → liste numérotée et désambiguïsation par numéro.
+- Contexte borné par tour : 8 derniers messages du canal, 5 actions en attente, références de la dernière réponse, prompt `whatsapp.md`.
+- `WHATSAPP_ASSISTANT_ENABLED` (défaut `true`) : à `false`, les messages texte sont ignorés et les validations par boutons continuent de fonctionner ; état affiché dans Paramètres → WhatsApp.
+- `docs/whatsapp-assistant.md` ; 31 nouveaux tests (190 au total) : numéro non autorisé, doublon, questions, contacts ambigus, rédaction, modification de brouillon, transfert par règle, demande de règlement, devis « le premier » → signature CRITICAL, validations et refus naturels, double validation, erreurs Claude / Outlook / WhatsApp, injection, aucune action hors Action Engine.
+
+### Modifié
+- `runChatTurn` accepte un canal, une liste d'outils, un contexte additionnel et un observateur de résultats : le Chat EMA de l'interface est inchangé.
+- Le webhook appelle `handleWhatsappEvent` au lieu de `handleInboundEvent` (le traitement des boutons reste identique).
+- `ARCHITECTURE.md` §9, `BUSINESS_RULES.md` §6 bis, `TOOLS.md`, `SECURITY.md` §4 bis, `CLAUDE.md` §9, `ROADMAP.md` (les relances passent en phase 7, le VPS en phase 8).
+
 ## [0.6.0] — Phase 5 — Devis / bon pour accord / signature graphique / tampon — 2026-09-15
 
 ### Ajouté

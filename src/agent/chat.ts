@@ -8,7 +8,9 @@ import { getSettings, type Settings } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
 import { getAnthropicClient, getModel } from "@/integrations/anthropic/client";
 import { toLlmError, type StructuredClient } from "@/integrations/anthropic/structured";
-import { executeTool, toAnthropicTools } from "@/tools";
+import { executeTool, toAnthropicTools, type ToolResult } from "@/tools";
+import type { ChatChannel } from "@/database/types";
+import type { NewChatMessage } from "@/database/repositories/chat";
 import { toolContextFor } from "./context";
 import { getPrompt, getSystemPrompt } from "./prompts";
 import { CATEGORY_LABELS } from "./schemas";
@@ -26,6 +28,20 @@ export interface ChatDeps {
   settings?: Settings;
   client?: StructuredClient;
   model?: string;
+  /** Canal de la conversation : interface web (défaut) ou WhatsApp (phase 6). */
+  channel?: ChatChannel;
+  /** Liste explicite des tools exposés (défaut : lecture seule de l'interface). */
+  toolNames?: readonly string[];
+  /** Contexte additionnel injecté dans le prompt système (références, actions en attente). */
+  systemExtra?: string;
+  /** Nombre de messages d'historique relus (contexte borné). */
+  historyLimit?: number;
+  /** Métadonnées du message utilisateur enregistré (identifiant Meta, expéditeur masqué). */
+  userMeta?: Pick<NewChatMessage, "externalId" | "sender">;
+  /** Métadonnées calculées pour le message de l'assistant (références numérotées). */
+  assistantMeta?: () => Pick<NewChatMessage, "refs" | "emailId" | "documentId" | "actionId">;
+  /** Observateur des résultats de tools (extraction des références, audit). */
+  onToolResult?: (name: string, result: ToolResult<unknown>) => void;
 }
 
 export interface ChatTurnResult {
@@ -42,16 +58,18 @@ export async function runChatTurn(userMessage: string, deps: ChatDeps = {}): Pro
   const settings = deps.settings ?? getSettings();
   const client = deps.client ?? getAnthropicClient();
   const model = deps.model ?? getModel();
+  const channel = deps.channel ?? "WEB";
+  const allowed = deps.toolNames ?? CHAT_READONLY_TOOLS;
 
-  chatRepo.insertChatMessage("user", userMessage, undefined, db);
-  const history = chatRepo.listChatMessages(HISTORY_MESSAGES, db).filter((m) => m.role !== "tool");
+  chatRepo.insertMessage({ role: "user", content: userMessage, channel, externalId: deps.userMeta?.externalId ?? null, sender: deps.userMeta?.sender ?? null }, db);
+  const history = chatRepo.listChatMessages(deps.historyLimit ?? HISTORY_MESSAGES, db, channel).filter((m) => m.role !== "tool");
   const messages: Anthropic.MessageParam[] = history.map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content }));
 
-  const tools = toAnthropicTools("chat").filter((t) => (CHAT_READONLY_TOOLS as readonly string[]).includes(t.name));
+  const tools = toAnthropicTools("chat").filter((t) => (allowed as readonly string[]).includes(t.name));
   const toolCtx = toolContextFor("chat", null, db);
   const system = `${getSystemPrompt()}\n\n${getPrompt("chat")}\n\nUtilisateur : ${settings.company.userName || ""} — ${settings.company.name || ""}. Date du jour : ${new Date().toISOString().slice(0, 10)}. Catégories EMA : ${Object.entries(CATEGORY_LABELS)
     .map(([k, v]) => `${k} = ${v}`)
-    .join(", ")}.`;
+    .join(", ")}.${deps.systemExtra ? `\n\n${deps.systemExtra}` : ""}`;
 
   const toolCalls: ChatTurnResult["toolCalls"] = [];
   const started = Date.now();
@@ -82,6 +100,7 @@ export async function runChatTurn(userMessage: string, deps: ChatDeps = {}): Pro
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const use of uses) {
         const r = await executeTool(use.name, use.input, toolCtx);
+        deps.onToolResult?.(use.name, r);
         toolCalls.push({ name: use.name, ok: r.ok });
         results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(r.ok ? r.data : { error: r.error }).slice(0, 20_000), is_error: !r.ok });
       }
@@ -94,7 +113,7 @@ export async function runChatTurn(userMessage: string, deps: ChatDeps = {}): Pro
     log.warn("chat turn failed", { kind: e.kind });
     throw e;
   }
-  chatRepo.insertChatMessage("assistant", finalText, toolCalls.length ? toolCalls : undefined, db);
+  chatRepo.insertMessage({ role: "assistant", content: finalText, toolCalls: toolCalls.length ? toolCalls : undefined, channel, ...(deps.assistantMeta?.() ?? {}) }, db);
   return { reply: finalText, toolCalls };
 }
 

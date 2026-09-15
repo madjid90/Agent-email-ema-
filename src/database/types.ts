@@ -228,12 +228,25 @@ export interface OAuthTokenRow {
   updated_at: string;
 }
 
+export type ChatChannel = "WEB" | "WHATSAPP";
+
 export interface ChatMessageRow {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
   tool_calls: string | null;
   created_at: string;
+  /** Canal d'origine : interface web ou WhatsApp (phase 6). */
+  channel: ChatChannel;
+  /** Identifiant Meta du message entrant (dédoublonnage, jamais le numéro en clair). */
+  external_id: string | null;
+  /** Expéditeur masqué (ex. « 3361…78 ») : jamais le numéro complet. */
+  sender: string | null;
+  /** Références numérotées présentées à l'utilisateur (JSON) — contexte multi-tours. */
+  refs: string | null;
+  email_id: string | null;
+  document_id: string | null;
+  action_id: string | null;
 }
 
 export function parseJson<T>(value: string | null | undefined, fallback: T): T {

@@ -37,3 +37,26 @@ export function buttonWebhook(from: string, buttonId: string, messageId = `wamid
     ],
   };
 }
+
+/** Corps de webhook Meta pour un message texte entrant. */
+export function textWebhook(from: string, body: string, messageId = `wamid.in.${Math.random().toString(36).slice(2)}`) {
+  return {
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        id: "WABA",
+        changes: [
+          {
+            field: "messages",
+            value: {
+              messaging_product: "whatsapp",
+              metadata: { display_phone_number: "33100000000", phone_number_id: "PHONE" },
+              contacts: [{ profile: { name: "Moi" }, wa_id: from }],
+              messages: [{ from, id: messageId, timestamp: "1700000000", type: "text", text: { body } }],
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
