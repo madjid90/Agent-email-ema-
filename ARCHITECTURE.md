@@ -109,9 +109,9 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 ## 6. Outlook (Microsoft Graph)
 
 - App Azure AD (client id/secret, tenant). Redirect `MICROSOFT_REDIRECT_URI`.
-- `/api/outlook/connect` → URL d'autorisation ; `/api/outlook/callback` → échange du code, stockage chiffré.
-- Appels Graph : `GET /me/messages`, `GET /me/messages/{id}`, `GET /me/messages?$filter=conversationId eq '…'`, `GET /me/messages/{id}/attachments`, `POST /me/messages/{id}/reply`, `POST /me/messages/{id}/forward`, `POST /me/sendMail`.
-- Refresh token automatique avant expiration ; erreur 401 → `refresh` puis retry unique.
+- `/api/integrations/microsoft/connect` → URL d'autorisation ; `/callback` → échange du code, stockage chiffré ; `/status`, `/sync`, `/disconnect`.
+- Appels Graph : `GET /me/mailFolders/inbox/messages/delta` (synchronisation incrémentale, curseur local), `GET /me/messages/{id}`, `GET /me/messages?$filter=conversationId eq '…'`, `GET /me/messages?$search=…`, `GET /me/messages/{id}/attachments`, `POST /me/messages/{id}/reply`, `POST /me/messages/{id}/forward`, `POST /me/sendMail`.
+- Refresh token automatique avant expiration ; erreur 401 → `refresh` puis retry unique. Détails : `docs/outlook.md`.
 
 ## 7. WhatsApp
 

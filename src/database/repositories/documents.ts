@@ -12,14 +12,16 @@ export interface NewDocument {
   category?: DocumentCategory;
   companyId?: string | null;
   originalPath: string;
+  storedName?: string | null;
+  sha256?: string | null;
   status?: string;
 }
 
 export function insertDocument(input: NewDocument, db: Db = getDb()): DocumentRow {
   const id = newId("doc");
   db.prepare(
-    `INSERT INTO documents (id, email_id, attachment_id, name, mime_type, size, category, company_id, original_path, status, created_at)
-     VALUES (@id, @email_id, @attachment_id, @name, @mime_type, @size, @category, @company_id, @original_path, @status, @created_at)`,
+    `INSERT INTO documents (id, email_id, attachment_id, name, mime_type, size, category, company_id, original_path, stored_name, sha256, status, created_at)
+     VALUES (@id, @email_id, @attachment_id, @name, @mime_type, @size, @category, @company_id, @original_path, @stored_name, @sha256, @status, @created_at)`,
   ).run({
     id,
     email_id: input.emailId ?? null,
@@ -30,6 +32,8 @@ export function insertDocument(input: NewDocument, db: Db = getDb()): DocumentRo
     category: input.category ?? "other",
     company_id: input.companyId ?? null,
     original_path: input.originalPath,
+    stored_name: input.storedName ?? null,
+    sha256: input.sha256 ?? null,
     status: input.status ?? "received",
     created_at: nowIso(),
   });
@@ -38,6 +42,10 @@ export function insertDocument(input: NewDocument, db: Db = getDb()): DocumentRo
 
 export function getDocument(id: string, db: Db = getDb()): DocumentRow | undefined {
   return db.prepare("SELECT * FROM documents WHERE id = ?").get(id) as DocumentRow | undefined;
+}
+
+export function getDocumentByAttachment(emailId: string, attachmentId: string, db: Db = getDb()): DocumentRow | undefined {
+  return db.prepare("SELECT * FROM documents WHERE email_id = ? AND attachment_id = ?").get(emailId, attachmentId) as DocumentRow | undefined;
 }
 
 export function listDocuments(opts: { category?: DocumentCategory; emailId?: string; limit?: number } = {}, db: Db = getDb()): DocumentRow[] {

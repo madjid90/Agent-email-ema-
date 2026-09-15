@@ -8,9 +8,10 @@ import { getContacts } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
-export default async function SetupPage({ searchParams }: { searchParams: Promise<{ step?: string }> }) {
-  const { step } = await searchParams;
+export default async function SetupPage({ searchParams }: { searchParams: Promise<{ step?: string; error?: string; connected?: string }> }) {
+  const { step, error, connected } = await searchParams;
   const env = getEnv();
+  const notice = error ? { tone: "danger" as const, text: `Connexion Outlook refusée : ${error}` } : connected ? { tone: "ok" as const, text: "Outlook connecté. Lancez une synchronisation pour vérifier." } : null;
   return (
     <>
       <h1>Configuration d&apos;EMA</h1>
@@ -22,6 +23,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
         contacts={getContacts()}
         integrations={getConfiguredIntegrations()}
         outlook={getOutlookStatus()}
+        notice={notice}
         whatsapp={getWhatsappStatus()}
         model={env.ANTHROPIC_MODEL}
         completedSteps={kvGetJson<string[]>("setup.completed_steps", [])}

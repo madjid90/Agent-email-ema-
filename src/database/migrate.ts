@@ -21,13 +21,24 @@ export function runMigrations(db: Database.Database): string[] {
   );
   const done: string[] = [];
   const insert = db.prepare("INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)");
-  for (const m of migrations) {
-    if (applied.has(m.name)) continue;
-    db.transaction(() => {
-      db.exec(m.sql);
-      insert.run(m.name, new Date().toISOString());
-    })();
-    done.push(m.name);
+  const pending = migrations.filter((m) => !applied.has(m.name));
+  if (pending.length === 0) return done;
+  // Les reconstructions de table exigent foreign_keys=OFF hors transaction
+  // (procédure SQLite officielle) ; l'intégrité est vérifiée après chaque migration.
+  const fkWasOn = (db.pragma("foreign_keys", { simple: true }) as number) === 1;
+  if (fkWasOn) db.pragma("foreign_keys = OFF");
+  try {
+    for (const m of pending) {
+      db.transaction(() => {
+        db.exec(m.sql);
+        const violations = db.pragma("foreign_key_check") as unknown[];
+        if (violations.length > 0) throw new Error(`Migration ${m.name} : violation de clés étrangères`);
+        insert.run(m.name, new Date().toISOString());
+      })();
+      done.push(m.name);
+    }
+  } finally {
+    if (fkWasOn) db.pragma("foreign_keys = ON");
   }
   return done;
 }

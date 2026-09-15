@@ -3,6 +3,7 @@ import { SettingsForm } from "@/components/settings-form";
 import { getSettings } from "@/lib/config";
 import { getConfiguredIntegrations, getEnv } from "@/lib/env";
 import { getOutlookStatus } from "@/integrations/microsoft";
+import { OutlookPanel } from "@/components/outlook-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export default function SettingsPage() {
         <table>
           <tbody>
             {row("Claude (Anthropic)", integrations.anthropic, `modèle : ${env.ANTHROPIC_MODEL}`)}
-            {row("Microsoft Graph / Outlook", integrations.microsoft, outlook.connected ? `connecté : ${outlook.accountEmail ?? ""}` : "non connecté")}
+            {row("Microsoft Graph / Outlook", integrations.microsoft && outlook.connected, outlook.connected ? `connecté : ${outlook.accountEmail ?? ""}` : "non connecté")}
             {row("WhatsApp Business", integrations.whatsapp)}
             {row("Secret applicatif (APP_SECRET)", integrations.appSecret)}
             {row("Mot de passe interface (APP_PASSWORD)", integrations.appPassword)}
@@ -29,6 +30,7 @@ export default function SettingsPage() {
         </table>
         <p className="muted" style={{ marginTop: "0.75rem" }}>Les secrets se modifient uniquement dans le fichier <code>.env</code> du VPS, jamais depuis l&apos;interface.</p>
       </Card>
+      <OutlookPanel status={outlook} timezone={settings.company.timezone} />
       <SettingsForm initial={settings} />
     </>
   );

@@ -33,6 +33,10 @@ const envSchema = z.object({
   CONFIG_PATH: z.string().trim().default("./config"),
 
   WORKER_POLL_INTERVAL: z.coerce.number().int().min(15).default(120),
+  // Synchronisation Outlook
+  EMAIL_SYNC_LIMIT: z.coerce.number().int().min(1).max(500).default(50),
+  EMAIL_INITIAL_SYNC_DAYS: z.coerce.number().int().min(0).max(365).default(7),
+  ATTACHMENT_MAX_MB: z.coerce.number().min(0.1).max(150).default(15),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 

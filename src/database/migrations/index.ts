@@ -4,10 +4,11 @@
  * dans le bundle Next.js comme dans le worker (tsx).
  */
 import * as m001 from "./001_init";
+import * as m002 from "./002_outlook";
 
 export interface Migration {
   name: string;
   sql: string;
 }
 
-export const migrations: Migration[] = [m001].map((m) => ({ name: m.name, sql: m.sql }));
+export const migrations: Migration[] = [m001, m002].map((m) => ({ name: m.name, sql: m.sql }));

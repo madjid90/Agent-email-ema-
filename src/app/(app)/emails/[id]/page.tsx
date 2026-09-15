@@ -30,6 +30,7 @@ export default async function EmailDetailPage({ params }: { params: Promise<{ id
       <h1>{email.subject}</h1>
       <div className="row" style={{ marginBottom: "1rem" }}>
         <StatusBadge status={email.status} />
+        {email.web_link ? <a className="btn small" href={email.web_link} target="_blank" rel="noreferrer">Ouvrir dans Outlook</a> : null}
         {analysis ? <><CategoryBadge category={analysis.category} /><UrgencyBadge urgency={analysis.urgency} /></> : null}
       </div>
 
@@ -52,7 +53,7 @@ export default async function EmailDetailPage({ params }: { params: Promise<{ id
           <div key={m.id} style={{ padding: "0.75rem 0", borderBottom: "1px solid var(--border)" }}>
             <div className="row between">
               <strong>{m.sender_name ?? m.sender_email ?? "—"} <span className="muted" style={{ fontWeight: 400 }}>&lt;{m.sender_email}&gt;</span></strong>
-              <span className="muted">{formatDateTime(m.received_at, tz)} · {m.direction === "outbound" ? "envoyé" : "reçu"}</span>
+              <span className="muted">{formatDateTime(m.received_at, tz)} · {m.direction === "outbound" ? "envoyé" : "reçu"}{m.status === "CONTEXT" ? " · contexte" : ""}</span>
             </div>
             <pre className="mono" style={{ marginTop: "0.5rem" }}>{m.body_text ?? m.body_preview}</pre>
           </div>
@@ -61,7 +62,7 @@ export default async function EmailDetailPage({ params }: { params: Promise<{ id
 
       {docs.length ? (
         <Card title="Pièces jointes">
-          <ul>{docs.map((d) => <li key={d.id}>{d.name} <span className="muted">({d.mime_type}, {Math.round(d.size / 1024)} Ko)</span> <span className="badge">{d.category}</span></li>)}</ul>
+          <ul>{docs.map((d) => <li key={d.id}><a href={`/api/documents/${d.id}/file`} target="_blank" rel="noreferrer">{d.name}</a> <span className="muted">({d.mime_type}, {Math.round(d.size / 1024)} Ko)</span> <span className="badge">{d.category}</span></li>)}</ul>
         </Card>
       ) : null}
 

@@ -101,7 +101,7 @@ tests/            vitest
 
 ## 8. Règles Outlook (Microsoft Graph)
 
-- Une seule mailbox : celle connectée via OAuth dans `/setup`. Scopes : `offline_access User.Read Mail.ReadWrite Mail.Send`.
+- Une seule mailbox : celle connectée via OAuth dans `/setup`. Scopes : `offline_access User.Read Mail.Read Mail.Send` (jamais Mail.ReadWrite : EMA ne modifie aucun email).
 - Toujours répondre **dans le thread** (`conversationId`) via `reply`/`replyAll`, jamais un nouveau mail pour une réponse.
 - Le worker ne traite un email qu'une fois (table `emails`, clé `graph_id` unique).
 - Les pièces jointes sont téléchargées dans `private/documents/<yyyy>/<mm>/` et référencées dans `documents`.

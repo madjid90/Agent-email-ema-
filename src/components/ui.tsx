@@ -49,6 +49,7 @@ const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   PROCESSED: { label: "Traité", tone: "ok" },
   IGNORED: { label: "Ignoré", tone: "" },
   ERROR: { label: "Erreur", tone: "danger" },
+  CONTEXT: { label: "Contexte", tone: "" },
   PENDING: { label: "En attente", tone: "warn" },
   EXPIRED: { label: "Expirée", tone: "" },
 };

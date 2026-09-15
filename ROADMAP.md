@@ -18,13 +18,18 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Scripts `backup.sh` / `restore.sh`, `ecosystem.config.cjs` PM2
 - ✅ `npm run check` (typecheck + lint + test + build) vert
 
-## PHASE 1 — Outlook ⏳
+## PHASE 1 — Outlook ✅
 
-- OAuth Microsoft (connect / callback / refresh), stockage chiffré
-- Client Graph : `get_new_emails`, `get_email`, `get_email_thread`, `search_emails`, `get_attachment`, `reply_email`, `forward_email`, `send_email`
-- Worker : scan périodique, dédoublonnage, téléchargement des pièces jointes
-- Page Emails alimentée par la base
-- Étape Outlook du setup fonctionnelle (« Outlook connecté », adresse, permissions)
+- ✅ OAuth Microsoft (authorization code, état anti-CSRF, refresh proactif et sur 401), stockage chiffré dans `oauth_tokens`
+- ✅ Permissions minimales : `offline_access User.Read Mail.Read Mail.Send` (pas de Mail.ReadWrite)
+- ✅ Client Graph centralisé : 401/429/5xx/réseau, pagination, erreurs assainies
+- ✅ Synchronisation delta de la boîte de réception (curseur local, limite par passage, première synchro bornée), dédoublonnage par `graph_id`
+- ✅ Threads via `conversationId` (messages importés en `CONTEXT`), recherche `$search`
+- ✅ Pièces jointes : téléchargement dans `private/documents/yyyy/mm/`, refus des types dangereux et des fichiers trop gros, SHA-256, unicité
+- ✅ Tools réels : `get_new_emails`, `get_email`, `get_email_thread`, `search_emails`, `get_attachment`
+- ✅ Exécuteurs Outlook `reply_email` / `forward_email` / `send_email` (+ emails internes de paiement) : envoi uniquement via l'Action Engine après validation
+- ✅ Worker : `scan_mailbox` réel ; routes `/api/integrations/microsoft/*` ; panneau Outlook (Setup + Paramètres), bouton Synchroniser (Emails)
+- ✅ 28 tests Microsoft/Outlook avec Graph mocké, `docs/outlook.md`
 
 ## PHASE 2 — Claude + compréhension email ⏳
 

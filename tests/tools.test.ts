@@ -88,7 +88,7 @@ describe("Couche de tools", () => {
   });
 
   it("les tools non encore implémentés échouent proprement", async () => {
-    const r = await executeTool("get_attachment", { email_id: "x", attachment_id: "y" }, ctx(db, "analyze"));
+    const r = await executeTool("classify_document", { document_id: "doc_x" }, ctx(db, "analyze"));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("NOT_IMPLEMENTED");
   });

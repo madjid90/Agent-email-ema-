@@ -6,6 +6,7 @@ import type { CompaniesFile, Contact, RulesFile, Settings } from "@/lib/config";
 import { SettingsForm } from "./settings-form";
 import { RulesEditor } from "./rules-editor";
 import { CompaniesEditor } from "./companies-editor";
+import { OutlookPanel, type OutlookPanelStatus } from "./outlook-panel";
 
 const STEPS = [
   { id: "company", label: "1. Entreprise" },
@@ -28,7 +29,8 @@ interface Props {
   companies: CompaniesFile;
   contacts: Contact[];
   integrations: { anthropic: boolean; microsoft: boolean; whatsapp: boolean; appSecret: boolean; appPassword: boolean };
-  outlook: { configured: boolean; connected: boolean; accountEmail: string | null; scopes: string[] };
+  outlook: OutlookPanelStatus;
+  notice?: { tone: "ok" | "danger"; text: string } | null;
   whatsapp: { configured: boolean; recipientConfigured: boolean };
   model: string;
   completedSteps: string[];
@@ -93,21 +95,10 @@ export function SetupWizard(p: Props) {
       {step === "company" ? (<><SettingsForm initial={p.settings} compact onSaved={() => void markDone("company")} />{navButtons()}</>) : null}
 
       {step === "outlook" ? (
-        <div className="card">
-          <h3>Connexion Outlook (Microsoft Graph)</h3>
-          {!p.integrations.microsoft ? (
-            <div className="alert warn">Renseignez <code>MICROSOFT_CLIENT_ID</code>, <code>MICROSOFT_CLIENT_SECRET</code>, <code>MICROSOFT_TENANT_ID</code> et <code>MICROSOFT_REDIRECT_URI</code> dans <code>.env</code>, puis redémarrez EMA.</div>
-          ) : null}
-          {p.outlook.connected ? (
-            <div className="alert ok">
-              <strong>Outlook connecté</strong><br />Adresse : {p.outlook.accountEmail ?? "—"}<br />Permissions : {p.outlook.scopes.join(", ") || "—"}
-            </div>
-          ) : (
-            <p className="muted">EMA ne demande jamais votre mot de passe : la connexion passe par OAuth Microsoft. Le bouton ci-dessous sera actif en phase 1.</p>
-          )}
-          <a className="btn primary" href="/api/outlook/connect" aria-disabled={!p.integrations.microsoft} onClick={(e) => { if (!p.integrations.microsoft) e.preventDefault(); }}>Connecter Outlook</a>
+        <>
+          <OutlookPanel status={p.outlook} timezone={p.settings.company.timezone} notice={p.notice ?? null} />
           {navButtons()}
-        </div>
+        </>
       ) : null}
 
       {step === "claude" ? (

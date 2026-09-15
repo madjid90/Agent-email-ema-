@@ -24,10 +24,10 @@ defineTool({
 | Tool | Entrée | Sortie | Risque | Effet |
 |---|---|---|---|---|
 | `get_new_emails` | `{ since?: ISO, max?: number }` | `Email[]` | LOW | Lecture |
-| `get_email` | `{ email_id }` | `Email` | LOW | Lecture |
-| `get_email_thread` | `{ email_id }` ou `{ thread_id }` | `Email[]` (ordre chronologique) | LOW | Lecture |
-| `search_emails` | `{ query, from?, subject?, since?, max? }` | `EmailSummary[]` | LOW | Lecture |
-| `get_attachment` | `{ email_id, attachment_id }` | `{ document_id, name, mime, size, text_preview? }` | LOW | Télécharge dans `private/documents/` |
+| `get_email` | `{ email_id }` | `Email` + liste des pièces jointes (`attachment_id`, `document_id` si déjà archivée) | LOW | Lecture (Graph si pièces jointes non archivées) |
+| `get_email_thread` | `{ email_id }` ou `{ thread_id }` | `Email[]` (ordre chronologique, 20 max) | LOW | Graph `conversationId`, messages inconnus importés en `CONTEXT` |
+| `search_emails` | `{ query, from?, since?, max? }` | `EmailSummary[]` | LOW | Graph `$search` (KQL), 50 max |
+| `get_attachment` | `{ email_id, attachment_id }` | `{ document_id, name, mime, size, text_preview }` | LOW | Télécharge dans `private/documents/yyyy/mm/` (refus types dangereux / trop gros) |
 | `reply_email` | `{ email_id, body, reply_all?, attachments?: document_id[] }` | `{ action_id }` | MEDIUM | Crée une action `reply_email` |
 | `forward_email` | `{ email_id, to: string[], comment? }` | `{ action_id }` | MEDIUM | Crée une action `forward_email` |
 | `send_email` | `{ to: string[], subject, body, attachments? }` | `{ action_id }` | MEDIUM | Crée une action `send_email` |

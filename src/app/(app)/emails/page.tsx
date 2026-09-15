@@ -4,6 +4,8 @@ import { getDb } from "@/database/connection";
 import { listEmailsWithAnalysis, type EmailWithAnalysis } from "@/database/repositories/analyses";
 import { getSettings, getCompanies } from "@/lib/config";
 import { formatDateTime } from "@/lib/time";
+import { getOutlookStatus } from "@/integrations/microsoft";
+import { SyncButton } from "@/components/sync-button";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +37,18 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const tz = getSettings().company.timezone;
   const companies = new Map(getCompanies().map((c) => [c.id, c.name]));
   const emails = listEmailsWithAnalysis({ limit: 300 }, db).filter((e) => belongs(e, tab));
+  const outlook = getOutlookStatus(db);
 
   return (
     <>
-      <h1>Emails</h1>
+      <div className="row between" style={{ marginBottom: "0.5rem" }}>
+        <h1 style={{ margin: 0 }}>Emails</h1>
+        <SyncButton connected={outlook.connected} />
+      </div>
+      <p className="muted" style={{ marginBottom: "1rem" }}>
+        {outlook.connected ? `${outlook.accountEmail ?? ""} · dernière synchronisation : ${formatDateTime(outlook.lastSyncAt, tz)} · dernier email : ${formatDateTime(outlook.lastEmailAt, tz)}` : "Outlook non connecté."}
+        {outlook.lastSyncError ? ` · erreur : ${outlook.lastSyncError}` : ""}
+      </p>
       <div className="tabs">
         {TABS.map((t) => (
           <Link key={t.id} href={`/emails?tab=${t.id}`} className={`tab${t.id === tab ? " active" : ""}`}>{t.label}</Link>
@@ -46,7 +56,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
       </div>
       <Card>
         {emails.length === 0 ? (
-          <Empty>Aucun email dans cette catégorie. La synchronisation Outlook arrive en phase 1.</Empty>
+          <Empty>Aucun email dans cette catégorie.{outlook.connected ? " Lancez une synchronisation ou attendez le prochain passage du worker." : " Connectez Outlook depuis le setup."}</Empty>
         ) : (
           <table>
             <thead>

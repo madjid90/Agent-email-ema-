@@ -1,21 +1,28 @@
 /** Types des lignes SQLite (miroir du schéma 001_init). */
 
-export type EmailStatus = "NEW" | "ANALYZED" | "ACTION_PROPOSED" | "PROCESSED" | "IGNORED" | "ERROR";
+/** CONTEXT = importé pour le contexte (thread, recherche), jamais traité comme un nouvel email. */
+export type EmailStatus = "NEW" | "ANALYZED" | "ACTION_PROPOSED" | "PROCESSED" | "IGNORED" | "ERROR" | "CONTEXT";
 export type EmailDirection = "inbound" | "outbound";
 
 export interface EmailRow {
   id: string;
   graph_id: string;
   thread_id: string | null;
+  internet_message_id: string | null;
   direction: EmailDirection;
   sender_name: string | null;
   sender_email: string | null;
   to_recipients: string; // JSON string[]
+  cc_recipients: string; // JSON string[]
   subject: string;
   body_preview: string;
   body_text: string | null;
   received_at: string;
+  sent_at: string | null;
   has_attachments: number;
+  is_read: number;
+  web_link: string | null;
+  folder: string | null;
   status: EmailStatus;
   created_at: string;
   updated_at: string;
@@ -114,6 +121,8 @@ export interface DocumentRow {
   category: DocumentCategory;
   company_id: string | null;
   original_path: string;
+  stored_name: string | null;
+  sha256: string | null;
   signed_path: string | null;
   extracted_text: string | null;
   extracted_data: string | null;

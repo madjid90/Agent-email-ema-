@@ -1,20 +1,25 @@
 import { expireApprovals } from "@/actions/engine";
 import { listDueFollowups } from "@/database/repositories/followups";
 import { kvSet } from "@/database/repositories/kv";
+import { createConnectedGraphClient, isOutlookConnected, syncInbox } from "@/integrations/microsoft";
 import { nowIso } from "@/lib/ids";
 import { createLogger } from "@/lib/logger";
 import type { WorkerTask } from "./scheduler";
 
 const log = createLogger("worker.tasks");
 
-/** Scan de la boîte Outlook (phase 1) : pour l'instant, enregistre juste le heartbeat. */
+/** Scan de la boîte Outlook : delta query → SQLite. L'analyse Claude arrive en phase 2. */
 export const scanMailboxTask = (intervalSeconds: number): WorkerTask => ({
   name: "scan_mailbox",
   intervalSeconds,
-  lockTtlSeconds: Math.max(60, intervalSeconds * 2),
+  lockTtlSeconds: Math.max(120, intervalSeconds * 2),
   run: async () => {
-    kvSet("worker.last_scan_at", nowIso());
-    log.debug("scan_mailbox: Graph non branché (phase 1)");
+    if (!isOutlookConnected()) {
+      log.debug("scan_mailbox: Outlook non connecté");
+      return;
+    }
+    const result = await syncInbox(createConnectedGraphClient());
+    if (result.inserted > 0 || result.errors.length > 0) log.info("scan_mailbox done", { inserted: result.inserted, attachments: result.attachments, pages: result.pages, errors: result.errors.length });
   },
 });
 

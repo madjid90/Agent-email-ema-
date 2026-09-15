@@ -38,7 +38,7 @@ nano .env
 Renseigner :
 
 - `ANTHROPIC_API_KEY`
-- `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID`, `MICROSOFT_REDIRECT_URI=https://ema.client.fr/api/outlook/callback`
+- `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID`, `MICROSOFT_REDIRECT_URI=https://ema.client.fr/api/integrations/microsoft/callback`
 - `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_RECIPIENT_NUMBER`
 - `APP_URL=https://ema.client.fr`
 - `APP_SECRET` : `openssl rand -hex 32`
@@ -49,9 +49,9 @@ Les fichiers `config/*.json` sont créés au premier lancement à partir des `*.
 ### Azure AD (Outlook)
 
 1. Portail Azure → App registrations → New registration.
-2. Redirect URI (Web) : `https://ema.client.fr/api/outlook/callback`.
+2. Redirect URI (Web) : `https://ema.client.fr/api/integrations/microsoft/callback`.
 3. Certificates & secrets → New client secret → copier dans `.env`.
-4. API permissions (Delegated) : `User.Read`, `Mail.ReadWrite`, `Mail.Send`, `offline_access`.
+4. API permissions (Delegated) : `User.Read`, `Mail.Read`, `Mail.Send`, `offline_access`. Voir `docs/outlook.md`.
 
 ### WhatsApp Business Cloud API
 
