@@ -10,6 +10,8 @@ import { runStructured, LlmError, type StructuredClient } from "@/integrations/a
 import { proposeAction, editActionPayload } from "@/actions/engine";
 import * as actionsRepo from "@/database/repositories/actions";
 import { notifyPendingApproval, type ApprovalDeps } from "@/integrations/whatsapp/approvals";
+import { analyzeEmailDocuments } from "@/documents/analyze";
+import { proposeFinancialActions } from "@/documents/routing";
 import { emailAnalysisSchema, type EmailAnalysis } from "./schemas";
 import { buildEmailContext, renderTrustedContext, renderUntrustedContext, type ContextDeps } from "./context";
 import { getPrompt, getSystemPrompt } from "./prompts";
@@ -35,6 +37,10 @@ export interface AnalyzeResult {
   reused: boolean;
   rules: RuleOutcome;
   actionIds: string[];
+  /** Nombre de pièces jointes PDF analysées. */
+  documents?: number;
+  /** Raisons pour lesquelles aucune action financière n'a été proposée. */
+  blockedReasons?: string[];
 }
 
 /** Prépare la requête (sans appel réseau) : utile pour les tests et le débogage. */
@@ -101,6 +107,22 @@ export async function analyzeEmail(emailId: string, deps: AnalyzeDeps = {}): Pro
     );
 
     const actionIds: string[] = [];
+
+    // Pièces jointes PDF : extraction + analyse documentaire (une erreur ne bloque pas l'email).
+    const documents = await analyzeEmailDocuments(email.id, { db, settings, companies, client: deps.client, model: deps.model, actor, force: deps.force });
+    const financial = proposeFinancialActions(
+      { email, analysis, rules, contacts, settings, documents: documents.map((d) => ({ row: d.document, extraction: d.extraction })) },
+      db,
+    );
+    for (const id of financial.actionIds) {
+      const action = actionsRepo.getAction(id, db);
+      if (action && action.status === "WAITING_APPROVAL") {
+        emailsRepo.transitionEmailStatus(email.id, ["ANALYZED"], "ACTION_PROPOSED", db);
+        actionIds.push(id);
+        await notifyPendingApproval(id, { db, settings, ...deps.whatsapp });
+      }
+    }
+
     if (analysis.needs_reply && analysis.reply_draft) {
       // Réanalyse : une réponse déjà en attente est mise à jour, jamais dupliquée (une seule demande active).
       const existing = actionsRepo.listActionsForEmail(email.id, db).find((a) => a.type === "reply_email" && (a.status === "WAITING_APPROVAL" || a.status === "PROPOSED"));
@@ -108,7 +130,7 @@ export async function analyzeEmail(emailId: string, deps: AnalyzeDeps = {}): Pro
         editActionPayload(existing.id, { body: analysis.reply_draft }, "ema", { db, settings });
         emailsRepo.transitionEmailStatus(email.id, ["ANALYZED"], "ACTION_PROPOSED", db);
         actionIds.push(existing.id);
-        return { analysis: row, reused: false, rules: outcome, actionIds };
+        return { analysis: row, reused: false, rules: outcome, actionIds, documents: documents.length, blockedReasons: financial.blockedReasons };
       }
       // Toujours soumise à validation (phase 3) : jamais exécutée immédiatement.
       const action = proposeAction(
@@ -128,7 +150,7 @@ export async function analyzeEmail(emailId: string, deps: AnalyzeDeps = {}): Pro
       actionIds.push(action.id);
       await notifyPendingApproval(action.id, { db, settings, ...deps.whatsapp });
     }
-    return { analysis: row, reused: false, rules: outcome, actionIds };
+    return { analysis: row, reused: false, rules: outcome, actionIds, documents: documents.length, blockedReasons: financial.blockedReasons };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erreur inconnue";
     emailsRepo.transitionEmailStatus(email.id, ["ANALYZING"], "ANALYSIS_FAILED", db);

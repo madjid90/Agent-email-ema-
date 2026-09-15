@@ -4,6 +4,8 @@ import path from "node:path";
 export default defineConfig({
   test: {
     environment: "node",
+    // Les fichiers de test partagent PRIVATE_STORAGE_PATH et le nettoient : pas de parallélisme inter-fichiers.
+    fileParallelism: false,
     include: ["tests/**/*.test.ts"],
     env: {
       DATABASE_PATH: ":memory:",

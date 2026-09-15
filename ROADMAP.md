@@ -61,12 +61,15 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ 18 nouveaux tests (WhatsApp et Graph mockés : double clic, rejeu, UI + WhatsApp simultanés, Graph en échec, brouillon modifié, mauvais numéro, expiration…), `docs/whatsapp.md`
 - ✅ **Scénario n°1 complet** : email → sync → analyse → brouillon → WhatsApp → validation → réponse Outlook → historique (validé avec Graph et WhatsApp simulés ; test réel à faire avec les credentials du client)
 
-## PHASE 4 — Factures + paiements ⏳
+## PHASE 4 — Factures + paiements ✅
 
-- Extraction PDF (texte + données facture)
-- Moteur de règles (`config/rules.json`) → transfert au bon contact
-- `prepare_payment_request` / `prepare_deposit_request`
-- Page Documents (Factures)
+- ✅ Document Engine (`src/documents/`) : extraction de texte PDF (pdf-parse v2, MIME/taille/signature vérifiés, PDF scanné détecté sans OCR), classification stricte (9 types), schéma d'extraction zod, garde-fous déterministes (cohérence HT/TVA/TTC, société vérifiée, IBAN, changement de RIB), doublons prudents
+- ✅ Routage déterministe : `forward_email` selon `config/rules.json`, `payment_request` / `deposit_request` (send_email interne, HIGH) vers le contact comptable configuré ; aucune adresse issue du modèle ; blocage sur injection, changement de RIB, doublon, absence de règle
+- ✅ Intégration Action Engine + WhatsApp (messages 📄 facture / 💳 paiement avec la note « aucun paiement bancaire »), exécuteurs Outlook réutilisés (forward avec pièces jointes, sendMail)
+- ✅ Worker : analyse documentaire déclenchée par l'analyse email, tâche de rattrapage `analyze_documents`
+- ✅ Tools réels : `extract_pdf_text`, `classify_document`, `extract_invoice_data`, `extract_quote_data`, `search_documents`, `get_document`, `list_pending_actions` ; chat lecture seule sans action bancaire
+- ✅ Interface : Documents (onglets, recherche, doublons, RIB, PDF sans texte), détail d'un document, pièces jointes analysées dans le détail d'un email, compteurs Aujourd'hui, détails facture dans À valider
+- ✅ Migration `005_documents`, 22 nouveaux tests avec fixtures PDF (pdf-lib) et intégrations mockées, `docs/documents.md`
 
 ## PHASE 5 — Devis + signature / tampon ⏳
 

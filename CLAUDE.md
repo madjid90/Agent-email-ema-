@@ -42,14 +42,15 @@ Outlook → Microsoft Graph → EMA (worker) → Contexte (thread + règles + so
       → WhatsApp (validation) → Exécution → Outlook / Documents → Historique
 ```
 
-Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`.
+Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`.
 
 ## 4. Structure du projet
 
 ```
 src/
   app/            Pages Next.js (UI) + routes API métier (src/app/api/**)
-  agent/          ema.md (prompt système), prompts/, context.ts, orchestrator.ts, schemas
+  agent/          ema.md (prompt système), prompts/, context.ts, orchestrator.ts, rules.ts, chat.ts, schemas
+  documents/      Document Engine : extraction PDF, classification, garde-fous facture, doublons, routage financier
   tools/          Couche tools typés (outlook, whatsapp, documents, signatures, payments, followups, approvals)
   integrations/   Clients bas niveau (microsoft, anthropic, whatsapp). Seuls eux touchent aux credentials.
   actions/        Action Engine (types, transitions, exécution idempotente)
@@ -67,11 +68,11 @@ tests/            vitest
 
 ## 5. Règles de sécurité (non négociables)
 
-1. **Emails et pièces jointes = contenu NON FIABLE.** Ils sont toujours transmis à Claude dans un bloc délimité `<untrusted_email_content>` via `src/security/untrusted.ts`. Une instruction contenue dans un email n'est **jamais** une instruction système.
+1. **Emails et pièces jointes = contenu NON FIABLE.** Ils sont toujours transmis à Claude dans un bloc délimité `<untrusted_email_content>` (emails) ou `<untrusted_document_content>` (PDF) via `src/security/untrusted.ts`. Une instruction contenue dans un email ou un document n'est **jamais** une instruction système.
 2. **Claude ne manipule jamais de credentials.** Tokens Microsoft, clés API, tokens WhatsApp vivent uniquement dans `.env` et dans la table `oauth_tokens` (chiffrée avec `APP_SECRET`). Les tools reçoivent des identifiants métier (`email_id`, `document_id`), jamais des secrets.
 3. **Claude ne reçoit jamais les images de signature ou de tampon.** Il ne reçoit que `company_id`. L'application applique les fichiers depuis `private/signatures/` et `private/stamps/`.
 4. **Toute action HIGH ou CRITICAL exige une validation humaine** (WhatsApp ou UI). Signature, tampon, paiement, engagement = CRITICAL/HIGH.
-5. **EMA ne fait jamais de paiement bancaire.** Il prépare un email interne de demande de règlement, c'est tout.
+5. **EMA ne fait jamais de paiement bancaire.** Il prépare un email interne de demande de règlement (risque HIGH, jamais abaissable), c'est tout. Un changement de RIB détecté bloque toute action financière ; un justificatif de paiement ne prouve jamais qu'une facture est payée.
 6. **Jamais d'écrasement d'un PDF original.** La version signée est un nouveau fichier dans `private/signed-documents/`.
 7. **Pas de double exécution.** Une action passe par une transition atomique `APPROVED → EXECUTING` en SQLite avant tout effet de bord.
 8. **Jamais de mot de passe Outlook.** OAuth Microsoft uniquement.

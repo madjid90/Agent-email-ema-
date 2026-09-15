@@ -4,6 +4,8 @@ import * as actionsRepo from "@/database/repositories/actions";
 import * as approvalsRepo from "@/database/repositories/approvals";
 import * as emailsRepo from "@/database/repositories/emails";
 import { getLatestAnalysis } from "@/database/repositories/analyses";
+import { getDocument } from "@/database/repositories/documents";
+import { formatAmount } from "@/lib/time";
 import { logHistory } from "@/database/repositories/history";
 import { claimWebhookEvent, setWebhookEventResult } from "@/database/repositories/webhook-events";
 import type { ActionRow, ApprovalRow } from "@/database/types";
@@ -55,6 +57,18 @@ export function buildApprovalMessageInput(action: ActionRow, approval: ApprovalR
   const notes: string[] = [];
   if (analysis?.requires_human_review === 1) notes.push("Validation humaine requise");
   if (analysis?.injection_suspected === 1) notes.push("tentative d'instruction détectée dans l'email");
+  const doc = action.document_id ? getDocument(action.document_id, db) : undefined;
+  const details: { label: string; value: string }[] = [];
+  const supplier = doc?.supplier_name ?? (typeof payload.supplier === "string" ? payload.supplier : null);
+  if (supplier) details.push({ label: "Fournisseur", value: supplier });
+  if (doc?.invoice_number) details.push({ label: "Facture", value: doc.invoice_number });
+  const amount = doc?.amount_incl_tax ?? (typeof payload.amount === "number" ? payload.amount : analysis?.amount_value ?? null);
+  if (amount !== null) details.push({ label: "Montant", value: `${formatAmount(amount, doc?.currency ?? (typeof payload.currency === "string" ? payload.currency : "EUR"))}${doc?.amount_incl_tax !== null && doc?.amount_incl_tax !== undefined ? " TTC" : ""}` });
+  const due = doc?.due_date ?? (typeof payload.due_date === "string" ? payload.due_date : analysis?.due_date ?? null);
+  if (due) details.push({ label: "Échéance", value: due });
+  if (doc?.possible_duplicate === 1) notes.push("doublon potentiel de facture");
+  if (doc?.bank_details_change === 1) notes.push("changement de coordonnées bancaires détecté");
+  const isPayment = action.type === "payment_request" || action.type === "deposit_request";
   return {
     approvalId: approval.id,
     kind: action.type,
@@ -65,8 +79,10 @@ export function buildApprovalMessageInput(action: ActionRow, approval: ApprovalR
     summary: analysis?.summary ?? null,
     proposedAction: `${ACTION_LABEL[action.type] ?? action.type}${to ? ` → ${to}` : ""}`,
     proposedReply: approval.proposed_reply,
-    confidence: analysis?.confidence ?? null,
+    confidence: doc?.doc_confidence ?? analysis?.confidence ?? null,
     humanReviewNote: notes.length ? notes.join(" — ") : null,
+    details,
+    note: isPayment ? "⚠️ EMA n'effectuera aucun paiement bancaire : seul un email interne de demande de règlement sera envoyé." : null,
   };
 }
 

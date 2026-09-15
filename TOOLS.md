@@ -36,11 +36,14 @@ defineTool({
 
 | Tool | Entrée | Sortie | Risque |
 |---|---|---|---|
-| `extract_pdf_text` | `{ document_id, max_chars? }` | `{ text, pages }` | LOW |
-| `classify_document` | `{ document_id }` | `{ type: invoice/quote/contract/other, confidence }` | LOW |
-| `extract_invoice_data` | `{ document_id }` | `InvoiceData` (supplier, invoiceNumber, amountHT/TTC, dueDate, site, subject) | LOW |
-| `extract_quote_data` | `{ document_id }` | `QuoteData` (supplier, company, amount, date, reference, subject) | LOW |
-| `archive_document` | `{ document_id, category, company_id? }` | `{ path }` | LOW |
+| `extract_pdf_text` | `{ document_id, max_chars? }` | `{ text, pages, truncated, status }` — extraction pdf-parse, une seule fois | LOW |
+| `classify_document` | `{ document_id }` | `{ type: INVOICE/CREDIT_NOTE/QUOTE/PAYMENT_PROOF/BANK_DETAILS/PURCHASE_ORDER/CONTRACT/OTHER/UNKNOWN, confidence, source }` | LOW |
+| `extract_invoice_data` | `{ document_id }` | données facture (fournisseur, numéro, montants HT/TVA/TTC, échéance, société, avertissements, doublons) — lance l'analyse si nécessaire | LOW |
+| `extract_quote_data` | `{ document_id }` | données devis + `signature_requested` | LOW |
+| `archive_document` | `{ document_id, category, company_id? }` | `{ document_id, category }` | LOW |
+| `search_documents` | `{ query?, supplier?, invoice_number?, document_type?, since?, requires_review?, possible_duplicate?, max? }` | documents archivés | LOW |
+| `get_document` | `{ document_id }` | détail + données extraites | LOW |
+| `list_pending_actions` | `{ max? }` | actions en attente de validation | LOW |
 
 ## Paiements (`src/tools/payments`)
 
@@ -88,7 +91,7 @@ Ces tools ne paient jamais : ils préparent un email interne et créent une acti
 | Mode | Tools exposés à Claude |
 |---|---|
 | `analyze` (worker) | lecture Outlook, documents, `schedule_followup`, création d'actions (reply/forward/payment/signature) |
-| `chat` (Chat EMA) | **phase 2 : lecture seule** — `get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `get_approval_status` (liste `CHAT_READONLY_TOOLS`, `src/agent/chat.ts`). Les tools à effet du mode `chat` seront activés avec la validation (phase 3). |
+| `chat` (Chat EMA) | **lecture seule** — `get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `get_approval_status`, `search_documents`, `get_document`, `list_pending_actions` (liste `CHAT_READONLY_TOOLS`, `src/agent/chat.ts`). Aucune action bancaire n'existe ; les actions à effet passent par l'Action Engine et la validation. |
 | `followup` (worker) | `get_email_thread`, `check_reply_received`, `reply_email`, `cancel_followup` |
 
 ## Contrat d'erreur

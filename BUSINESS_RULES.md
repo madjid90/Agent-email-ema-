@@ -62,25 +62,28 @@ Règle absolue : `HIGH` et `CRITICAL` ⇒ validation humaine, sans exception, m�
 
 ## 4. Factures
 
-1. Récupérer le PDF joint.
-2. Extraire : fournisseur, société destinataire, numéro de facture, montant HT/TTC, échéance, site/chantier, objet.
-3. Consulter `config/rules.json` (`when.category = "invoice"`, `supplierContains`, `companyId`…).
-4. Proposer `forward` vers le destinataire de la règle (ex. Brink's → Magali ; fournisseur classique → Nabila).
-5. Validation WhatsApp → transfert avec la pièce jointe → archivage dans `private/documents/` → `documents.status = forwarded`.
+1. Récupérer le PDF joint (phase 1), extraire son texte (pdf-parse), le classer (`INVOICE`, `CREDIT_NOTE`…).
+2. Extraire : fournisseur, société destinataire, numéro, date, montants HT / TVA / TTC, échéance, bon de commande, IBAN (présence et 4 derniers caractères), référence de paiement. Toute donnée absente = `null`.
+3. Garde-fous en code : cohérence HT + TVA = TTC, société vérifiée contre `config/companies.json`, doublons potentiels (empreinte, fournisseur + numéro, fournisseur + montant + date), changement de RIB.
+4. Consulter `config/rules.json` (`when.category = "INVOICE"`, `supplierContains`, `companyId`…) : la **première règle `forward`** donne le destinataire (ex. Brink's → Magali ; fournisseur classique → Nabila).
+5. Proposer `forward_email` (email original + pièces jointes + message d'accompagnement) → validation WhatsApp → transfert → archivage.
 
-Aucune adresse n'est dans le code : tout vient de `config/rules.json` / `config/contacts.json`.
+Sans règle, sans destinataire fiable, en cas de doublon potentiel, de changement de RIB ou d'instruction suspecte : **aucune action**, vérification humaine. Aucune adresse n'est dans le code ni inventée par le modèle. Détails : `docs/documents.md`.
 
 ## 5. Paiements et acomptes
 
-Déclencheurs : demande d'acompte, règlement attendu, paiement bloquant, facture non réglée.
+Déclencheurs : `PAYMENT_REQUEST` (facture impayée, règlement attendu, paiement bloquant), `DEPOSIT_REQUEST` (acompte).
 
-EMA prépare un email **interne** (destinataire : règle `payment`/`deposit`, sinon l'utilisateur) :
+EMA prépare un email **interne** (`send_email`, risque **HIGH**, jamais abaissable) au destinataire issu d'une règle `forward` de la catégorie ou d'un contact interne au rôle comptabilité / paiement / finance :
 
+> Objet : Demande de règlement — Fournisseur ABC — facture F1234
+>
 > Bonjour,
-> peux-tu procéder au règlement de l'acompte concernant le projet X (montant : … € — fournisseur : … — échéance : …) ?
+> Peux-tu procéder au règlement de la facture ABC F1234 d'un montant de 1 845,20 € TTC ?
+> Échéance : 30/09/2026.
 > Merci.
 
-EMA **ne fait jamais** de virement, ne se connecte à aucune banque, ne saisit aucun IBAN. Validation WhatsApp obligatoire avant envoi.
+Pour un acompte : montant, pourcentage et total si présents. EMA **ne fait jamais** de virement, ne se connecte à aucune banque, ne saisit aucun IBAN, ne valide aucune dépense et ne considère jamais une facture comme payée (un justificatif de paiement reçu est décrit comme « document présenté comme justificatif »). Un changement de coordonnées bancaires détecté bloque toute action financière et affiche « ⚠️ Changement de coordonnées bancaires détecté — vérification humaine requise ». Validation WhatsApp obligatoire avant tout envoi.
 
 ## 6. Devis / signature / tampon
 

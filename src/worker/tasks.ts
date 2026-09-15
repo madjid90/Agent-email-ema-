@@ -4,6 +4,8 @@ import { kvSet } from "@/database/repositories/kv";
 import { createConnectedGraphClient, isOutlookConnected, syncInbox } from "@/integrations/microsoft";
 import { analyzePendingEmails } from "@/agent/orchestrator";
 import { notifyUnsentApprovals, isWhatsappConfigured } from "@/integrations/whatsapp";
+import { analyzeDocument } from "@/documents/analyze";
+import { listDocumentsPendingAnalysis } from "@/database/repositories/documents";
 import { getConfiguredIntegrations } from "@/lib/env";
 import { nowIso } from "@/lib/ids";
 import { createLogger } from "@/lib/logger";
@@ -64,6 +66,26 @@ export const expireApprovalsTask: WorkerTask = {
   run: async () => {
     const n = expireApprovals();
     if (n > 0) log.info("approvals expired", { count: n });
+  },
+};
+
+/** Documents PDF jamais analysés (téléchargés à la demande, ou analyse interrompue). */
+export const analyzeDocumentsTask: WorkerTask = {
+  name: "analyze_documents",
+  intervalSeconds: 300,
+  lockTtlSeconds: 600,
+  run: async () => {
+    if (!getConfiguredIntegrations().anthropic) return;
+    let n = 0;
+    for (const doc of listDocumentsPendingAnalysis(5)) {
+      try {
+        await analyzeDocument(doc.id);
+        n++;
+      } catch (err) {
+        log.warn("document analysis failed", { documentId: doc.id, message: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (n > 0) log.info("documents analyzed", { count: n });
   },
 };
 

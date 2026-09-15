@@ -12,17 +12,22 @@ export interface ApprovalMessageInput {
   proposedReply: string | null;
   confidence: number | null;
   humanReviewNote: string | null;
+  /** Lignes supplémentaires (facture : fournisseur, numéro, montant, échéance). */
+  details?: { label: string; value: string }[];
+  /** Note finale (ex. « EMA n'effectuera aucun paiement bancaire »). */
+  note?: string | null;
 }
 
 const ACTION_TITLES: Record<string, string> = {
-  reply_email: "Réponse à valider",
-  forward_email: "Transfert à valider",
-  send_email: "Email à valider",
-  payment_request: "Demande de règlement à valider",
-  deposit_request: "Demande d'acompte à valider",
-  sign_document: "Signature à valider",
-  send_followup: "Relance à valider",
+  reply_email: "📩 EMA — Réponse à valider",
+  forward_email: "📄 EMA — Facture à traiter",
+  send_email: "📩 EMA — Email à valider",
+  payment_request: "💳 EMA — Demande de paiement",
+  deposit_request: "💳 EMA — Demande d'acompte",
+  sign_document: "✍️ EMA — Signature à valider",
+  send_followup: "⏰ EMA — Relance à valider",
 };
+const DEFAULT_TITLE = "📩 EMA — Action à valider";
 
 function cut(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -30,15 +35,17 @@ function cut(text: string, max: number): string {
 
 /** Corps lisible et compact du message de validation. */
 export function formatApprovalBody(m: ApprovalMessageInput): string {
-  const lines: string[] = [`📩 EMA — ${ACTION_TITLES[m.kind] ?? "Action à valider"}`, ""];
+  const lines: string[] = [ACTION_TITLES[m.kind] ?? DEFAULT_TITLE, ""];
   lines.push(`De : ${m.senderName ?? m.senderEmail ?? "—"}${m.senderName && m.senderEmail ? ` <${m.senderEmail}>` : ""}`);
   if (m.company) lines.push(`Entreprise : ${m.company}`);
   lines.push(`Objet : ${m.subject || "(sans objet)"}`);
+  for (const d of m.details ?? []) lines.push(`${d.label} : ${d.value}`);
   if (m.summary) lines.push("", `Résumé : ${m.summary}`);
   lines.push("", `Action proposée : ${m.proposedAction}`);
-  if (m.proposedReply) lines.push("", "Réponse proposée :", `"${m.proposedReply.trim()}"`);
+  if (m.proposedReply) lines.push("", m.kind === "reply_email" ? "Réponse proposée :" : "Message proposé :", `"${m.proposedReply.trim()}"`);
   if (m.confidence !== null) lines.push("", `Confiance : ${Math.round(m.confidence * 100)} %`);
   if (m.humanReviewNote) lines.push(`⚠ ${m.humanReviewNote}`);
+  if (m.note) lines.push("", m.note);
   return lines.join("\n");
 }
 
@@ -60,7 +67,7 @@ export function buildApprovalMessages(to: string, m: ApprovalMessageInput): (Wha
     interactive: { type: "button", body: { text }, footer: { text: cut("Valider envoie réellement l'email.", WHATSAPP_LIMITS.interactiveFooter) }, action: { buttons } },
   });
   if (body.length <= WHATSAPP_LIMITS.interactiveBody) return [interactive(body)];
-  const short = `📩 EMA — ${ACTION_TITLES[m.kind] ?? "Action à valider"}\nObjet : ${cut(m.subject || "(sans objet)", 120)}\nDétails dans le message précédent.`;
+  const short = `${ACTION_TITLES[m.kind] ?? DEFAULT_TITLE}\nObjet : ${cut(m.subject || "(sans objet)", 120)}\nDétails dans le message précédent.`;
   return [{ messaging_product: "whatsapp", to, type: "text", text: { body: cut(body, WHATSAPP_LIMITS.textBody) } }, interactive(short)];
 }
 

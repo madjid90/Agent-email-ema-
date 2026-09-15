@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Card, CategoryBadge, ConfidenceBadge, RiskBadge, StatusBadge, UrgencyBadge, actionLabel } from "@/components/ui";
+import { Card, CategoryBadge, ConfidenceBadge, DocTypeBadge, RiskBadge, StatusBadge, UrgencyBadge, actionLabel } from "@/components/ui";
 import { ReanalyzeButton } from "@/components/reanalyze-button";
 import { getDb } from "@/database/connection";
 import { getEmail, listThread } from "@/database/repositories/emails";
@@ -85,8 +85,30 @@ export default async function EmailDetailPage({ params }: { params: Promise<{ id
       </Card>
 
       {docs.length ? (
-        <Card title="Pièces jointes">
-          <ul>{docs.map((d) => <li key={d.id}><a href={`/api/documents/${d.id}/file`} target="_blank" rel="noreferrer">{d.name}</a> <span className="muted">({d.mime_type}, {Math.round(d.size / 1024)} Ko)</span> <span className="badge">{d.category}</span></li>)}</ul>
+        <Card title="Pièces jointes analysées">
+          <table>
+            <thead><tr><th>Fichier</th><th>Type</th><th>Fournisseur</th><th>N°</th><th>Montant</th><th>Échéance</th><th>Société</th><th>Confiance</th><th>Statut</th></tr></thead>
+            <tbody>
+              {docs.map((d) => (
+                <tr key={d.id}>
+                  <td><Link href={`/documents/${d.id}`}>{d.name}</Link> <a className="muted" href={`/api/documents/${d.id}/file`} target="_blank" rel="noreferrer" style={{ fontSize: "0.8rem" }}>(PDF)</a></td>
+                  <td><DocTypeBadge type={d.doc_type} /></td>
+                  <td>{d.supplier_name ?? "—"}</td>
+                  <td>{d.invoice_number ?? "—"}</td>
+                  <td>{d.amount_incl_tax !== null ? `${formatAmount(d.amount_incl_tax, d.currency ?? "EUR")} TTC` : "—"}</td>
+                  <td>{d.due_date ?? "—"}</td>
+                  <td>{d.company_id ? companies.get(d.company_id) ?? d.company_id : "—"}</td>
+                  <td><ConfidenceBadge confidence={d.doc_confidence} reliable={settings.analysis.reliableThreshold} review={settings.analysis.reviewThreshold} /></td>
+                  <td className="stack">
+                    {d.requires_human_review === 1 ? <span className="badge warn">À vérifier</span> : null}
+                    {d.possible_duplicate === 1 ? <span className="badge danger">Doublon potentiel</span> : null}
+                    {d.bank_details_change === 1 ? <span className="badge danger">⚠️ Changement RIB</span> : null}
+                    {d.text_status === "no_text" ? <span className="badge">Sans texte</span> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
       ) : null}
 

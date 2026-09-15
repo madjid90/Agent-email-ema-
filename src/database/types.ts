@@ -154,6 +154,7 @@ export interface FollowupRow {
 }
 
 export type DocumentCategory = "invoice" | "quote" | "signed" | "other";
+export type DocumentTextStatus = "pending" | "extracted" | "no_text" | "unsupported" | "error";
 
 export interface DocumentRow {
   id: string;
@@ -173,6 +174,23 @@ export interface DocumentRow {
   status: string;
   created_at: string;
   signed_at: string | null;
+  doc_type: string | null;
+  text_status: DocumentTextStatus;
+  text_pages: number | null;
+  supplier_name: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  amount_excl_tax: number | null;
+  amount_incl_tax: number | null;
+  currency: string | null;
+  doc_confidence: number | null;
+  requires_human_review: number;
+  possible_duplicate: number;
+  duplicate_of: string; // JSON string[]
+  bank_details_change: number;
+  analyzed_at: string | null;
+  analysis_error: string | null;
 }
 
 export type HistoryActor = "ema" | "user" | "worker" | "whatsapp" | "system";

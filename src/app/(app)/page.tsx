@@ -6,6 +6,7 @@ import { analysisStats, listEmailsWithAnalysis } from "@/database/repositories/a
 import { listActions } from "@/database/repositories/actions";
 import { listFollowups } from "@/database/repositories/followups";
 import { llmUsageSince } from "@/database/repositories/llm-runs";
+import { documentStats } from "@/database/repositories/documents";
 import { getSettings } from "@/lib/config";
 import { startOfTodayIso, formatTime, formatAmount } from "@/lib/time";
 
@@ -30,6 +31,14 @@ const RECO_PRIORITY: Record<string, { dot: string; label: string }> = {
   schedule_followup: { dot: "green", label: "Relance à programmer" },
 };
 
+function analyzedByCategory(list: { category: string | null }[], category: string): number {
+  return list.filter((e) => e.category === category).length;
+}
+
+function pendingFinancial(db: ReturnType<typeof getDb>): number {
+  return listActions({ status: "WAITING_APPROVAL", limit: 200 }, db).filter((a) => a.type === "forward_email" || a.type === "payment_request" || a.type === "deposit_request").length;
+}
+
 export default function TodayPage() {
   const db = getDb();
   const settings = getSettings();
@@ -38,6 +47,8 @@ export default function TodayPage() {
   const received = countEmails({ since }, db);
   const stats = analysisStats(since, db);
   const usage = llmUsageSince(since, db);
+  const docs = documentStats(since, db);
+  const financialPending = pendingFinancial(db);
   const pending = listActions({ status: "WAITING_APPROVAL", limit: 50 }, db);
   const todayEnd = new Date(new Date(since).getTime() + 86_400_000).toISOString();
   const followupsToday = listFollowups({ status: ["SCHEDULED", "WAITING_APPROVAL"] }, db).filter((f) => f.execute_at >= since && f.execute_at < todayEnd);
@@ -62,6 +73,14 @@ export default function TodayPage() {
         <Stat label="Devis / documents à signer" value={stats.quotes} />
         <Stat label="Relances du jour" value={followupsToday.length} />
       </div>
+      <div className="grid grid-4">
+        <Stat label="Factures reçues aujourd'hui" value={docs.invoices} />
+        <Stat label="Demandes de paiement / acomptes" value={(analyzedByCategory(analyzed, "PAYMENT_REQUEST") + analyzedByCategory(analyzed, "DEPOSIT_REQUEST"))} tone={analyzedByCategory(analyzed, "PAYMENT_REQUEST") + analyzedByCategory(analyzed, "DEPOSIT_REQUEST") ? "warn" : undefined} />
+        <Stat label="Documents à vérifier" value={docs.toReview} tone={docs.toReview ? "warn" : undefined} />
+        <Stat label="Doublons potentiels" value={docs.duplicates} tone={docs.duplicates ? "danger" : undefined} />
+      </div>
+      {docs.bankChanges ? <div className="alert danger">⚠️ {docs.bankChanges} document(s) annonçant un changement de coordonnées bancaires — vérification humaine requise, aucune action financière.</div> : null}
+      {financialPending ? <div className="alert info">{financialPending} action(s) financière(s) administrative(s) à valider (transfert de facture, demande de règlement). <Link href="/a-valider">Voir</Link></div> : null}
       {stats.failed ? <div className="alert danger">{stats.failed} analyse(s) en échec aujourd&apos;hui : ouvrir l&apos;email puis « Réanalyser ».</div> : null}
 
       <Card title="Priorités" actions={<Link className="btn small" href="/emails">Voir les emails</Link>}>

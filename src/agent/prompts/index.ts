@@ -22,7 +22,7 @@ export function getSystemPrompt(): string {
   return read(SYSTEM_PROMPT_PATH);
 }
 
-export type PromptName = "analyze-email" | "followup" | "chat";
+export type PromptName = "analyze-email" | "analyze-document" | "followup" | "chat";
 
 export function getPrompt(name: PromptName): string {
   return read(path.join(PROMPTS_DIR, `${name}.md`));

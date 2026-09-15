@@ -28,7 +28,7 @@ describe("Couche de tools", () => {
 
   it("enregistre tous les tools prévus par TOOLS.md", () => {
     const names = listTools().map((t) => t.name);
-    for (const n of ["get_new_emails", "get_email", "get_email_thread", "search_emails", "get_attachment", "reply_email", "forward_email", "send_email", "extract_pdf_text", "classify_document", "extract_invoice_data", "extract_quote_data", "archive_document", "prepare_payment_request", "prepare_deposit_request", "schedule_followup", "cancel_followup", "check_reply_received", "request_approval", "get_approval_status", "prepare_signed_document", "apply_signature", "apply_stamp"]) {
+    for (const n of ["get_new_emails", "get_email", "get_email_thread", "search_emails", "get_attachment", "reply_email", "forward_email", "send_email", "extract_pdf_text", "classify_document", "extract_invoice_data", "extract_quote_data", "archive_document", "search_documents", "get_document", "list_pending_actions", "prepare_payment_request", "prepare_deposit_request", "schedule_followup", "cancel_followup", "check_reply_received", "request_approval", "get_approval_status", "prepare_signed_document", "apply_signature", "apply_stamp"]) {
       expect(names).toContain(n);
     }
   });
@@ -87,10 +87,13 @@ describe("Couche de tools", () => {
     if (!r.ok) expect(r.error.code).toBe("CONFIG");
   });
 
-  it("les tools non encore implémentés échouent proprement", async () => {
+  it("les tools renvoient des erreurs assainies (document inconnu, tool interne)", async () => {
     const r = await executeTool("classify_document", { document_id: "doc_x" }, ctx(db, "analyze"));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.code).toBe("NOT_IMPLEMENTED");
+    if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
+    const internal = await executeTool("apply_signature", { document_id: "doc_x", company_id: "c" }, ctx(db, "analyze"));
+    expect(internal.ok).toBe(false);
+    if (!internal.ok) expect(internal.error.code).toBe("FORBIDDEN");
   });
 
   it("schedule_followup + check_reply_received", async () => {

@@ -58,7 +58,10 @@ export default function ApprovalsPage() {
           {email ? <p><span className="muted">Objet :</span> <Link href={`/emails/${email.id}`}>{email.subject || "(sans objet)"}</Link></p> : null}
           {amount !== null ? <p><span className="muted">Montant :</span> {formatAmount(amount, currency)}</p> : null}
           {to ? <p><span className="muted">Destinataire :</span> {to}</p> : null}
-          {doc ? <p><span className="muted">Document :</span> {doc.name}</p> : null}
+          {doc ? <p><span className="muted">Document :</span> <Link href={`/documents/${doc.id}`}>{doc.name}</Link>{doc.supplier_name ? ` — ${doc.supplier_name}` : ""}{doc.invoice_number ? ` n° ${doc.invoice_number}` : ""}{doc.amount_incl_tax !== null ? ` — ${formatAmount(doc.amount_incl_tax, doc.currency ?? "EUR")} TTC` : ""}{doc.due_date ? ` — échéance ${doc.due_date}` : ""}</p> : null}
+          {doc?.possible_duplicate === 1 ? <p><span className="badge danger">Doublon potentiel</span></p> : null}
+          {doc?.bank_details_change === 1 ? <p><span className="badge danger">⚠️ Changement RIB détecté</span></p> : null}
+          {a.type === "payment_request" || a.type === "deposit_request" ? <p className="muted">⚠️ EMA n&apos;effectuera aucun paiement bancaire : seul un email interne sera envoyé.</p> : null}
           {approval ? <p><span className="muted">Validation :</span> {approval.status}{approval.decided_by ? ` (${approval.decided_by})` : ""}{approval.status === "PENDING" ? ` · expire le ${formatDateTime(approval.expires_at, tz)}` : ""}</p> : null}
         </div>
         {analysis ? <p style={{ marginTop: "0.5rem" }}><span className="muted">EMA a compris :</span> {analysis.summary}{analysis.requires_human_review === 1 ? <span className="badge warn" style={{ marginLeft: "0.5rem" }}>Validation humaine requise</span> : null}</p> : null}

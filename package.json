@@ -1,6 +1,6 @@
 {
   "name": "ema",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "EMA - Agent administratif IA pour une boîte Outlook professionnelle (instance privée, déployée sur VPS)",
   "scripts": {
@@ -23,6 +23,8 @@
     "@anthropic-ai/sdk": "^0.125.0",
     "better-sqlite3": "^13.0.3",
     "next": "^15.5.25",
+    "pdf-lib": "^1.17.1",
+    "pdf-parse": "^2.4.5",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.5"

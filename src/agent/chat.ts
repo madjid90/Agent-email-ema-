@@ -16,7 +16,7 @@ import { CATEGORY_LABELS } from "./schemas";
 const log = createLogger("chat");
 
 /** Phase 2 : outils de LECTURE uniquement. Aucun outil à effet n'est exposé au chat. */
-export const CHAT_READONLY_TOOLS = ["get_email", "get_email_thread", "search_emails", "get_email_analysis", "list_recent_emails", "get_approval_status"] as const;
+export const CHAT_READONLY_TOOLS = ["get_email", "get_email_thread", "search_emails", "get_email_analysis", "list_recent_emails", "get_approval_status", "search_documents", "get_document", "list_pending_actions"] as const;
 const MAX_TURNS = 6;
 const HISTORY_MESSAGES = 12;
 

@@ -44,6 +44,7 @@ Au premier démarrage, `config/*.json` est créé à partir de `config/*.example
 - [docs/outlook.md](docs/outlook.md) — Outlook / Microsoft Graph
 - [docs/analysis.md](docs/analysis.md) — analyse des emails par Claude
 - [docs/whatsapp.md](docs/whatsapp.md) — validation WhatsApp
+- [docs/documents.md](docs/documents.md) — factures, paiements, Document Engine
 
 ## Licence
 

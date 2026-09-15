@@ -114,3 +114,20 @@ export function ConfidenceBadge({ confidence, reliable = 0.85, review = 0.6 }: {
   if (confidence >= review) return <span className="badge warn" title="Confiance moyenne : vérifier">{pct} ⚠</span>;
   return <span className="badge danger" title="Confiance faible : validation humaine">{pct}</span>;
 }
+
+const DOC_TYPE: Record<string, { label: string; tone: string }> = {
+  INVOICE: { label: "Facture", tone: "primary" },
+  CREDIT_NOTE: { label: "Avoir", tone: "primary" },
+  QUOTE: { label: "Devis", tone: "primary" },
+  PAYMENT_PROOF: { label: "Justificatif de paiement", tone: "" },
+  BANK_DETAILS: { label: "RIB / coordonnées bancaires", tone: "warn" },
+  PURCHASE_ORDER: { label: "Bon de commande", tone: "" },
+  CONTRACT: { label: "Contrat", tone: "" },
+  OTHER: { label: "Autre", tone: "" },
+  UNKNOWN: { label: "Indéterminé", tone: "" },
+};
+export function DocTypeBadge({ type }: { type: string | null }) {
+  if (!type) return <span className="badge">Non analysé</span>;
+  const t = DOC_TYPE[type] ?? { label: type, tone: "" };
+  return <span className={`badge ${t.tone}`}>{t.label}</span>;
+}

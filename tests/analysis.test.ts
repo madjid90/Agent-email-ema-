@@ -85,7 +85,12 @@ describe("Analyse d'un email par Claude (mocké)", () => {
     expect(r.rules.forwardRule?.id).toBe("invoice-brinks");
     expect(r.analysis.requires_human_review).toBe(1); // transfert avec validation
     expect(r.analysis.amount_value).toBe(450);
-    expect(actions.listActionsForEmail(e.id, db)).toHaveLength(0);
+    // Phase 4 : transfert proposé selon la règle, en attente de validation (jamais envoyé ici)
+    const acts = actions.listActionsForEmail(e.id, db);
+    expect(acts).toHaveLength(1);
+    expect(acts[0]?.type).toBe("forward_email");
+    expect(acts[0]?.status).toBe("WAITING_APPROVAL");
+    expect(JSON.parse(acts[0]!.payload).to).toEqual(["magali@exemple.fr"]);
   });
 
   it("devis à signer : toujours validation humaine", async () => {

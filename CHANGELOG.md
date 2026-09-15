@@ -2,6 +2,24 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [0.5.0] — Phase 4 — Factures / demandes de paiement / acomptes — 2026-09-15
+
+### Ajouté
+- Document Engine `src/documents/` : `extract-text.ts` (pdf-parse v2, contrôles MIME/taille/signature, PDF sans texte → revue humaine), `classify.ts` (heuristique, IBAN, changement de RIB), `types.ts` (types documentaires, schéma d'extraction zod), `invoice.ts` (garde-fous déterministes, doublons), `analyze.ts` (Claude en sortie structurée, persistance, historique), `routing.ts` (actions financières déterministes).
+- Prompt `analyze-document.md` ; contenu des documents encapsulé dans `<untrusted_document_content>`.
+- Orchestrateur : analyse des PDF après l'analyse email, puis `forward_email` (règle) ou `payment_request` / `deposit_request` (contact comptable) en `WAITING_APPROVAL` + WhatsApp ; une seule action financière active par email.
+- Messages WhatsApp enrichis (fournisseur, facture, montant, échéance, doublon, RIB, note « aucun paiement bancaire »).
+- Tools documents réels + `search_documents`, `get_document`, `list_pending_actions` ; chat étendu aux données documentaires, refus explicite de toute action bancaire.
+- Routes `GET /api/documents`, `GET /api/documents/{id}`, `POST /api/documents/{id}/analyze` (chemin privé jamais exposé).
+- Interface : page Documents branchée (onglets, recherche, statuts), page détail d'un document, pièces jointes analysées dans le détail d'un email, compteurs et alertes sur Aujourd'hui, détails facture dans À valider.
+- Worker : tâche `analyze_documents`.
+- Migration `005_documents` (type, statut d'extraction, données facture dénormalisées, doublons, changement de RIB).
+- Dépendances `pdf-parse`, `pdf-lib` ; 22 nouveaux tests (fixtures PDF générées, Anthropic/WhatsApp/Graph mockés) ; `docs/documents.md`.
+
+### Modifié
+- `BUSINESS_RULES.md` §4-5, `TOOLS.md`, `SECURITY.md`, `CLAUDE.md`, `ROADMAP.md`.
+- Tests exécutés sans parallélisme inter-fichiers (dossier privé partagé).
+
 ## [0.4.0] — Phase 3 — WhatsApp / validation / exécution — 2026-09-15
 
 ### Ajouté
