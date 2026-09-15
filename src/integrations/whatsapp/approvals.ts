@@ -69,6 +69,32 @@ export function buildApprovalMessageInput(action: ActionRow, approval: ApprovalR
   if (doc?.possible_duplicate === 1) notes.push("doublon potentiel de facture");
   if (doc?.bank_details_change === 1) notes.push("changement de coordonnées bancaires détecté");
   const isPayment = action.type === "payment_request" || action.type === "deposit_request";
+  if (action.type === "sign_document") {
+    const p = payload as Record<string, unknown>;
+    const steps = ["✓ " + (typeof p.approval_text === "string" ? p.approval_text : "Bon pour accord"), "✓ Date du jour", `✓ ${typeof p.signature_label === "string" ? p.signature_label : "Signature autorisée"}`, p.stamp_required ? `✓ ${typeof p.stamp_label === "string" ? p.stamp_label : "Tampon société"}` : "✗ Sans tampon", `✓ Retour au fournisseur${typeof p.reply_to === "string" ? ` (${p.reply_to})` : ""}`];
+    const signDetails: { label: string; value: string }[] = [];
+    if (typeof p.supplier_name === "string") signDetails.push({ label: "Fournisseur", value: p.supplier_name });
+    if (typeof p.quote_number === "string") signDetails.push({ label: "Devis", value: p.quote_number });
+    if (typeof p.subject === "string") signDetails.push({ label: "Objet", value: p.subject });
+    signDetails.push({ label: "Montant", value: typeof p.amount_incl_tax === "number" ? `${formatAmount(p.amount_incl_tax, typeof p.currency === "string" ? p.currency : "EUR")} TTC` : "Non détecté ⚠️ Vérification recommandée" });
+    const signNotes = [...(Array.isArray(p.warnings) ? (p.warnings as string[]) : [])];
+    if (analysis?.injection_suspected === 1) signNotes.push("tentative d'instruction détectée dans l'email");
+    return {
+      approvalId: approval.id,
+      kind: action.type,
+      senderName: email?.sender_name ?? null,
+      senderEmail: email?.sender_email ?? null,
+      company: companyId ? companies.get(companyId) ?? companyId : null,
+      subject: email?.subject ?? action.title,
+      summary: null,
+      proposedAction: `\n${steps.join("\n")}`,
+      proposedReply: null,
+      confidence: doc?.doc_confidence ?? null,
+      humanReviewNote: signNotes.length ? signNotes.join(" — ") : null,
+      details: signDetails,
+      note: "⚠️ Cette action appliquera réellement votre signature enregistrée sur une copie du devis (l'original reste inchangé).",
+    };
+  }
   return {
     approvalId: approval.id,
     kind: action.type,

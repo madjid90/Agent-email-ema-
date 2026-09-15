@@ -40,6 +40,14 @@ export const settingsSchema = z.object({
       expireAfterHours: z.number().int().min(1).max(720).default(48),
     })
     .default({ channel: "whatsapp", expireAfterHours: 48 }),
+  signature: z
+    .object({
+      /** Montant TTC à partir duquel un avertissement supplémentaire est affiché (toute signature reste CRITICAL). */
+      warningAmount: z.number().min(0).default(10000),
+      replySubjectPrefix: z.string().default("Devis signé —"),
+      replyTemplate: z.string().default("Bonjour,\n\nVeuillez trouver en pièce jointe le devis signé avec notre bon pour accord.\n\nBien cordialement,"),
+    })
+    .default({ warningAmount: 10000, replySubjectPrefix: "Devis signé —", replyTemplate: "Bonjour,\n\nVeuillez trouver en pièce jointe le devis signé avec notre bon pour accord.\n\nBien cordialement," }),
   analysis: z
     .object({
       /** ≥ reliable : analyse fiable ; entre review et reliable : avertissement ; < review : validation humaine. */
@@ -129,16 +137,43 @@ export type Contact = z.infer<typeof contactSchema>;
 export const contactsFileSchema = z.object({ version: z.number().int().default(1), contacts: z.array(contactSchema).default([]) });
 export type ContactsFile = z.infer<typeof contactsFileSchema>;
 
+const overlayBox = z.object({ x: z.number(), y: z.number(), width: z.number().positive().optional(), height: z.number().positive().optional() });
+
+/**
+ * Placement déterministe de la signature (jamais choisi par le modèle).
+ * APPEND_APPROVAL_PAGE (défaut, sûr) : page d'approbation ajoutée à la fin.
+ * OVERLAY_LAST_PAGE : positions explicites sur la dernière page (points PDF, origine en bas à gauche).
+ */
+export const signaturePlacementSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("APPEND_APPROVAL_PAGE") }),
+  z.object({
+    mode: z.literal("OVERLAY_LAST_PAGE"),
+    page: z.literal("last").default("last"),
+    approvalText: overlayBox,
+    date: overlayBox,
+    signature: overlayBox,
+    stamp: overlayBox.optional(),
+  }),
+]);
+export type SignaturePlacement = z.infer<typeof signaturePlacementSchema>;
+
 export const companySchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  legalName: z.string().default(""),
   legalForm: z.string().default(""),
   siret: z.string().default(""),
   address: z.string().default(""),
+  email: z.string().default(""),
   signatory: z.object({ name: z.string().default(""), title: z.string().default("") }),
   // Chemins relatifs à private/ ; jamais transmis à Claude.
   signaturePath: z.string().nullable().default(null),
   stampPath: z.string().nullable().default(null),
+  /** Texte d'accord apposé sur le devis. */
+  quoteApprovalText: z.string().min(1).default("Bon pour accord"),
+  /** Le tampon est obligatoire pour signer (sinon uniquement s'il est configuré). */
+  stampRequired: z.boolean().default(false),
+  signaturePlacement: signaturePlacementSchema.default({ mode: "APPEND_APPROVAL_PAGE" }),
   aliases: z.array(z.string()).default([]),
 });
 export type Company = z.infer<typeof companySchema>;

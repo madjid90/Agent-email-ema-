@@ -42,7 +42,7 @@ Outlook → Microsoft Graph → EMA (worker) → Contexte (thread + règles + so
       → WhatsApp (validation) → Exécution → Outlook / Documents → Historique
 ```
 
-Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`.
+Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`. Devis / signature : `docs/signatures.md`.
 
 ## 4. Structure du projet
 
@@ -118,11 +118,14 @@ tests/            vitest
 - Une seule demande active par action : pas de renvoi tant qu'une demande `PENDING` a été notifiée.
 - Ne jamais envoyer de secret ou de pièce jointe brute sur WhatsApp ; uniquement résumé, montant, société, action proposée, réponse proposée.
 
-## 10. Règles signatures / tampons
+## 10. Règles signatures graphiques / tampons
 
-- Sociétés dans `config/companies.json` : nom, signataire, fonction, `signaturePath`, `stampPath` (relatifs à `private/`).
-- Workflow : original conservé → copie → mention « Bon pour accord » + date + nom du signataire → signature → tampon → nouveau PDF dans `private/signed-documents/` → réponse Outlook avec le PDF → `documents.signed_path` renseigné → `history`.
-- Action `sign_document` = `CRITICAL`, validation obligatoire, une seule exécution.
+- Sociétés dans `config/companies.json` : nom, signataire, fonction, `signaturePath`, `stampPath` (relatifs à `private/`, PNG vérifiés), `quoteApprovalText`, `stampRequired`, `signaturePlacement` (`APPEND_APPROVAL_PAGE` par défaut ; `OVERLAY_LAST_PAGE` uniquement avec coordonnées explicites — Claude ne choisit jamais de coordonnées).
+- Seul un `QUOTE` entre dans le workflow ; un contrat ou tout autre type = traitement manuel. Société absente, ambiguë ou sans signature configurée = aucune action.
+- Workflow : original conservé → copie → mention d'accord (« Bon pour accord ») + date serveur + nom du signataire → signature enregistrée → tampon → nouveau PDF dans `private/signed-documents/` (nouvelle ligne `documents`, `parent_document_id`, empreintes) → réponse Outlook dans le thread avec le seul PDF signé → `documents.signed_path` / `signed_document_id` → `history`.
+- Action `sign_document` = `CRITICAL`, jamais abaissable, une seule validation, une seule exécution ; un nouvel essai réutilise la copie signée existante. PDF chiffré/corrompu → `FAILED`, jamais contourné.
+- Un seul tool : `prepare_signed_document({ document_id, company_id })`. Aucun tool d'application de signature/tampon n'existe pour Claude.
+- Toujours parler de « signature enregistrée » / « signature graphique » : jamais de signature électronique qualifiée, eIDAS ou cryptographique.
 
 ## 11. Commandes
 

@@ -39,7 +39,7 @@ defineTool({
 | `extract_pdf_text` | `{ document_id, max_chars? }` | `{ text, pages, truncated, status }` — extraction pdf-parse, une seule fois | LOW |
 | `classify_document` | `{ document_id }` | `{ type: INVOICE/CREDIT_NOTE/QUOTE/PAYMENT_PROOF/BANK_DETAILS/PURCHASE_ORDER/CONTRACT/OTHER/UNKNOWN, confidence, source }` | LOW |
 | `extract_invoice_data` | `{ document_id }` | données facture (fournisseur, numéro, montants HT/TVA/TTC, échéance, société, avertissements, doublons) — lance l'analyse si nécessaire | LOW |
-| `extract_quote_data` | `{ document_id }` | données devis + `signature_requested` | LOW |
+| `extract_quote_data` | `{ document_id }` | données devis (référence, validité, objet, montants, acompte, conditions) + `signature_requested` | LOW |
 | `archive_document` | `{ document_id, category, company_id? }` | `{ document_id, category }` | LOW |
 | `search_documents` | `{ query?, supplier?, invoice_number?, document_type?, since?, requires_review?, possible_duplicate?, max? }` | documents archivés | LOW |
 | `get_document` | `{ document_id }` | détail + données extraites | LOW |
@@ -73,11 +73,9 @@ Ces tools ne paient jamais : ils préparent un email interne et créent une acti
 
 | Tool | Entrée | Sortie | Risque |
 |---|---|---|---|
-| `prepare_signed_document` | `{ document_id, company_id, email_id }` | `{ action_id }` | CRITICAL |
-| `apply_signature` | `{ document_id, company_id, page?, position? }` | `{ signed_document_id }` | CRITICAL (interne, appelé par l'exécuteur) |
-| `apply_stamp` | `{ document_id, company_id, page?, position? }` | `{ signed_document_id }` | CRITICAL (interne) |
+| `prepare_signed_document` | `{ document_id, company_id }` | `{ prepared, action_id?, status?, risk_level?, requires_approval, reasons[], warnings[] }` | CRITICAL |
 
-`apply_signature` et `apply_stamp` ne sont **pas exposés à Claude** : seul `prepare_signed_document` l'est. L'exécuteur `sign_document` les appelle après validation.
+C'est le **seul** tool de signature. Il vérifie les prérequis (`checkSignatureReadiness`) et crée l'action `sign_document` en `WAITING_APPROVAL` — rien d'autre. Il n'existe **aucun** tool `apply_signature` / `apply_stamp` : l'application de la signature et du tampon (`createSignedCopy`, `buildSignedPdf` dans `src/documents/`) est une fonction interne appelée uniquement par l'exécuteur `sign_document` après validation humaine. Claude ne reçoit que `company_id` et des libellés logiques (« Signature Prénom Nom », « Tampon Société »), jamais un chemin, une image ni un base64. Détails : `docs/signatures.md`.
 
 ## Analyses (`src/tools/analysis`)
 
@@ -91,7 +89,7 @@ Ces tools ne paient jamais : ils préparent un email interne et créent une acti
 | Mode | Tools exposés à Claude |
 |---|---|
 | `analyze` (worker) | lecture Outlook, documents, `schedule_followup`, création d'actions (reply/forward/payment/signature) |
-| `chat` (Chat EMA) | **lecture seule** — `get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `get_approval_status`, `search_documents`, `get_document`, `list_pending_actions` (liste `CHAT_READONLY_TOOLS`, `src/agent/chat.ts`). Aucune action bancaire n'existe ; les actions à effet passent par l'Action Engine et la validation. |
+| `chat` (Chat EMA) | **lecture seule** — `get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `get_approval_status`, `search_documents`, `get_document`, `list_pending_actions` — plus `prepare_signed_document`, qui ne fait que proposer une action CRITICAL à valider (liste `CHAT_READONLY_TOOLS`, `src/agent/chat.ts`). Aucune action bancaire n'existe ; les actions à effet passent par l'Action Engine et la validation. |
 | `followup` (worker) | `get_email_thread`, `check_reply_received`, `reply_email`, `cancel_followup` |
 
 ## Contrat d'erreur

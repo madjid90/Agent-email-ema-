@@ -19,10 +19,11 @@ describe("Chat EMA (lecture seule)", () => {
   });
   afterEach(() => resetToolsForTests());
 
-  it("n'expose que des outils de lecture", () => {
-    for (const forbidden of ["reply_email", "forward_email", "send_email", "prepare_payment_request", "prepare_signed_document", "schedule_followup", "cancel_followup", "archive_document"]) {
+  it("n'expose que des outils de lecture (+ préparation de signature, qui ne fait que proposer une action CRITICAL)", () => {
+    for (const forbidden of ["reply_email", "forward_email", "send_email", "prepare_payment_request", "schedule_followup", "cancel_followup", "archive_document", "apply_signature", "apply_stamp"]) {
       expect(CHAT_READONLY_TOOLS).not.toContain(forbidden);
     }
+    expect(CHAT_READONLY_TOOLS).toContain("prepare_signed_document");
   });
 
   it("explique une analyse existante via get_email_analysis puis répond", async () => {

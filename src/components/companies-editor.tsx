@@ -7,7 +7,7 @@ function slug(s: string): string {
   return s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || `societe-${Date.now()}`;
 }
 
-const EMPTY: Company = { id: "", name: "", legalForm: "", siret: "", address: "", signatory: { name: "", title: "" }, signaturePath: null, stampPath: null, aliases: [] };
+const EMPTY: Company = { id: "", name: "", legalName: "", legalForm: "", siret: "", address: "", email: "", signatory: { name: "", title: "" }, signaturePath: null, stampPath: null, quoteApprovalText: "Bon pour accord", stampRequired: false, signaturePlacement: { mode: "APPEND_APPROVAL_PAGE" }, aliases: [] };
 
 export function CompaniesEditor({ initial }: { initial: CompaniesFile }) {
   const [companies, setCompanies] = useState<Company[]>(initial.companies);
@@ -99,6 +99,16 @@ export function CompaniesEditor({ initial }: { initial: CompaniesFile }) {
             <div className="field"><label>Adresse</label><input value={editing.address} onChange={(e) => setEditing({ ...editing, address: e.target.value })} /></div>
             <div className="field"><label>Signataire</label><input value={editing.signatory.name} onChange={(e) => setEditing({ ...editing, signatory: { ...editing.signatory, name: e.target.value } })} required /></div>
             <div className="field"><label>Fonction</label><input value={editing.signatory.title} onChange={(e) => setEditing({ ...editing, signatory: { ...editing.signatory, title: e.target.value } })} placeholder="Président" /></div>
+            <div className="field"><label>Raison sociale (sur la page d&apos;approbation)</label><input value={editing.legalName} onChange={(e) => setEditing({ ...editing, legalName: e.target.value })} placeholder="Entreprise X SAS" /></div>
+            <div className="field"><label>Email de la société</label><input value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} /></div>
+            <div className="field"><label>Texte d&apos;accord apposé sur les devis</label><input value={editing.quoteApprovalText} onChange={(e) => setEditing({ ...editing, quoteApprovalText: e.target.value })} placeholder="Bon pour accord" /></div>
+            <div className="field"><label>Placement de la signature</label>
+              <select value={editing.signaturePlacement.mode} onChange={(e) => setEditing({ ...editing, signaturePlacement: e.target.value === "OVERLAY_LAST_PAGE" ? { mode: "OVERLAY_LAST_PAGE", page: "last", approvalText: { x: 60, y: 140 }, date: { x: 60, y: 120 }, signature: { x: 60, y: 40, width: 160, height: 60 }, stamp: { x: 300, y: 30, width: 110, height: 110 } } : { mode: "APPEND_APPROVAL_PAGE" } })}>
+                <option value="APPEND_APPROVAL_PAGE">Page d&apos;approbation ajoutée (sûr, par défaut)</option>
+                <option value="OVERLAY_LAST_PAGE">Dernière page, positions configurées (config/companies.json)</option>
+              </select>
+            </div>
+            <div className="field"><label className="row"><input type="checkbox" checked={editing.stampRequired} onChange={(e) => setEditing({ ...editing, stampRequired: e.target.checked })} style={{ width: "auto" }} /> Tampon obligatoire pour signer</label></div>
             <div className="field"><label>Alias (séparés par des virgules)</label><input value={editing.aliases.join(", ")} onChange={(e) => setEditing({ ...editing, aliases: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></div>
           </div>
           <div className="row">

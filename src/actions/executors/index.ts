@@ -2,6 +2,7 @@ import { registerExecutor } from "../engine";
 import type { ActionExecutor, ActionType } from "../types";
 import { NotImplementedError } from "@/lib/errors";
 import { createOutlookExecutors } from "./outlook";
+import { createSigningExecutor } from "./signing";
 
 /**
  * Enregistrement des exécuteurs. Les envois Outlook (reply/forward/send et les
@@ -11,7 +12,6 @@ import { createOutlookExecutors } from "./outlook";
 const PLANNED_PHASE: Partial<Record<ActionType, string>> = {
   archive: "phase 4",
   send_followup: "phase 6",
-  sign_document: "phase 5",
 };
 
 function stub(type: ActionType, phase: string): ActionExecutor {
@@ -38,5 +38,6 @@ export function registerDefaultExecutors(): void {
   registerExecutor(prepareReply as ActionExecutor);
   for (const [type, phase] of Object.entries(PLANNED_PHASE) as [ActionType, string][]) registerExecutor(stub(type, phase));
   for (const ex of createOutlookExecutors()) registerExecutor(ex);
+  registerExecutor(createSigningExecutor() as ActionExecutor);
   registered = true;
 }

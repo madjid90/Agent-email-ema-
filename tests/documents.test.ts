@@ -1,3 +1,4 @@
+import { makeCompany } from "./helpers/config";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import { openIsolatedDb, type Db } from "@/database/connection";
@@ -31,8 +32,8 @@ import { makeTextPdf, makeBlankPdf, seedPdfDocument, INVOICE_LINES } from "./hel
 const APPROVER = "33612345678";
 const settings = settingsSchema.parse({ company: { name: "Mon Entreprise", userName: "Madjid", email: "moi@entreprise.fr" }, agent: { signatureText: "Cordialement,\nMadjid" } });
 const companies: Company[] = [
-  { id: "alpha", name: "Alpha SAS", legalForm: "SAS", siret: "", address: "", signatory: { name: "M", title: "" }, signaturePath: null, stampPath: null, aliases: ["ALPHA"] },
-  { id: "beta", name: "Beta SARL", legalForm: "SARL", siret: "", address: "", signatory: { name: "M", title: "" }, signaturePath: null, stampPath: null, aliases: [] },
+  makeCompany({ id: "alpha", name: "Alpha SAS", legalForm: "SAS", aliases: ["ALPHA"] }),
+  makeCompany({ id: "beta", name: "Beta SARL", legalForm: "SARL" }),
 ];
 const contacts: Contact[] = [{ id: "nabila", name: "Nabila", email: "nabila@exemple.fr", role: "Comptabilité fournisseurs", internal: true }];
 const rules: Rule[] = [
@@ -44,7 +45,7 @@ const rules: Rule[] = [
 function invoiceExtraction(overrides: Partial<DocumentExtraction> = {}): DocumentExtraction {
   return documentExtractionSchema.parse({
     document_type: "INVOICE", summary: "Facture ABC Services de maintenance septembre.", supplier_name: "ABC Services", supplier_email: "compta@abc-services.fr",
-    invoice_number: "F2026-1245", invoice_date: "2026-09-15", due_date: "2026-09-30", purchase_order_number: null, customer_company_name: "Alpha SAS", company_id: "alpha",
+    invoice_number: "F2026-1245", quote_number: null, invoice_date: "2026-09-15", due_date: "2026-09-30", valid_until: null, subject: null, payment_terms: null, delivery_or_service_date: null, signature_requested: false, purchase_order_number: null, customer_company_name: "Alpha SAS", company_id: "alpha",
     amount_excl_tax: 1537.67, vat_amount: 307.53, amount_incl_tax: 1845.2, currency: "EUR", deposit_amount: null, deposit_percent: null, total_amount: null,
     iban_present: true, iban_last4: "0189", bank_details_change_suspected: false, payment_reference: null, document_confidence: 0.96, requires_human_review: false, warnings: [], injection_suspected: false,
     ...overrides,

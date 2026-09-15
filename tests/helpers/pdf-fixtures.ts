@@ -79,3 +79,14 @@ export async function seedPdfDocument(db: Db, bytes: Buffer, opts: { name?: stri
   }, db);
   return { emailId: email.id, documentId: doc.id };
 }
+
+/** PDF minimal portant un dictionnaire /Encrypt (pdf-lib le refuse sans ignoreEncryption). */
+export function makeEncryptedPdf(): Buffer {
+  return Buffer.from(`%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >> endobj
+4 0 obj << /Filter /Standard /V 1 /R 2 /Length 40 /P -1 /O <00> /U <00> >> endobj
+trailer << /Root 1 0 R /Encrypt 4 0 R /ID [<01><02>] >>
+%%EOF`);
+}

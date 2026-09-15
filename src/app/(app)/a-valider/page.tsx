@@ -26,7 +26,7 @@ const TYPE_LABEL: Record<string, string> = {
   prepare_reply: "Brouillon",
   archive: "Archivage",
 };
-const SIGN_STEPS = ["Bon pour accord", "Date", "Signature", "Tampon", "Retour par email dans le thread"];
+import { formatDateOnly } from "@/lib/time";
 const DRAFT_TYPES = new Set(["reply_email", "send_email", "payment_request", "deposit_request", "send_followup"]);
 
 export default function ApprovalsPage() {
@@ -47,6 +47,7 @@ export default function ApprovalsPage() {
     const amount = typeof payload.amount === "number" ? payload.amount : analysis?.amount_value ?? null;
     const currency = typeof payload.currency === "string" ? payload.currency : analysis?.amount_currency ?? "EUR";
     const draft = typeof payload.body === "string" ? payload.body : typeof payload.reply_body === "string" ? payload.reply_body : null;
+    if (a.type === "sign_document") DRAFT_TYPES.add("sign_document");
     const to = Array.isArray(payload.to) ? (payload.to as string[]).join(", ") : null;
     const companyId = a.company_id ?? analysis?.company_id ?? null;
     return (
@@ -65,9 +66,30 @@ export default function ApprovalsPage() {
           {approval ? <p><span className="muted">Validation :</span> {approval.status}{approval.decided_by ? ` (${approval.decided_by})` : ""}{approval.status === "PENDING" ? ` · expire le ${formatDateTime(approval.expires_at, tz)}` : ""}</p> : null}
         </div>
         {analysis ? <p style={{ marginTop: "0.5rem" }}><span className="muted">EMA a compris :</span> {analysis.summary}{analysis.requires_human_review === 1 ? <span className="badge warn" style={{ marginLeft: "0.5rem" }}>Validation humaine requise</span> : null}</p> : null}
-        {a.type === "sign_document" ? <p style={{ marginTop: "0.5rem" }}><span className="muted">Action :</span> {SIGN_STEPS.join(" → ")}</p> : null}
+        {a.type === "sign_document" ? (
+          <div className="alert info" style={{ marginTop: "0.5rem" }}>
+            <strong>DEVIS À SIGNER</strong>
+            <div className="form-grid" style={{ marginTop: "0.4rem" }}>
+              <p><span className="muted">Document :</span> {doc ? <Link href={`/documents/${doc.id}`}>{doc.name}</Link> : "—"}</p>
+              <p><span className="muted">Fournisseur :</span> {typeof payload.supplier_name === "string" ? payload.supplier_name : "—"}</p>
+              <p><span className="muted">Référence :</span> {typeof payload.quote_number === "string" ? payload.quote_number : "—"}</p>
+              <p><span className="muted">Objet :</span> {typeof payload.subject === "string" ? payload.subject : "—"}</p>
+              <p><span className="muted">Montant :</span> {typeof payload.amount_incl_tax === "number" ? `${formatAmount(payload.amount_incl_tax, typeof payload.currency === "string" ? payload.currency : "EUR")} TTC` : <span className="badge warn">Non détecté — vérification recommandée</span>}</p>
+              <p><span className="muted">Société :</span> {companyId ? companies.get(companyId) ?? companyId : "—"}</p>
+              <p><span className="muted">Validité :</span> {typeof payload.valid_until === "string" ? formatDateOnly(payload.valid_until, tz) : "—"}{payload.quote_expired ? <span className="badge danger" style={{ marginLeft: "0.4rem" }}>⚠️ Devis potentiellement expiré</span> : null}</p>
+              <p><span className="muted">Bon pour accord :</span> « {typeof payload.approval_text === "string" ? payload.approval_text : "Bon pour accord"} » + date du jour</p>
+              <p><span className="muted">Signature :</span> {typeof payload.signature_label === "string" ? payload.signature_label : "—"}{typeof payload.signer_name === "string" ? ` (${payload.signer_name}${typeof payload.signer_title === "string" ? `, ${payload.signer_title}` : ""})` : ""}</p>
+              <p><span className="muted">Tampon :</span> {payload.stamp_required ? `Oui — ${typeof payload.stamp_label === "string" ? payload.stamp_label : ""}` : "Non"}</p>
+              <p><span className="muted">Placement :</span> {payload.placement_strategy === "OVERLAY_LAST_PAGE" ? "Dernière page (positions configurées)" : "Page d'approbation ajoutée"}</p>
+              <p><span className="muted">Retour :</span> {typeof payload.reply_to === "string" ? payload.reply_to : email?.sender_email ?? "—"}</p>
+            </div>
+            {Array.isArray(payload.warnings) && (payload.warnings as string[]).length ? <ul style={{ marginTop: "0.4rem" }}>{(payload.warnings as string[]).map((w) => <li key={w} className="muted">⚠️ {w}</li>)}</ul> : null}
+            <p className="muted" style={{ marginTop: "0.4rem", fontSize: "0.85rem" }}>Signature graphique enregistrée appliquée sur une copie ; l&apos;original reste inchangé. Ce n&apos;est pas une signature électronique qualifiée.</p>
+          </div>
+        ) : null}
         {draft ? <p className="muted" style={{ marginTop: "0.75rem" }}>Réponse proposée :</p> : null}
         <ApprovalCard
+          sign={a.type === "sign_document" ? { signedDocumentId: doc?.signed_document_id ?? null, sentTo: typeof payload.reply_to === "string" ? payload.reply_to : email?.sender_email ?? null, completedAt: a.completed_at ? formatDateTime(a.completed_at, tz) : null } : null}
           actionId={a.id}
           actionStatus={a.status}
           approvalStatus={approval?.status ?? null}

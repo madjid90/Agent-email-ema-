@@ -8,10 +8,11 @@ import * as m002 from "./002_outlook";
 import * as m003 from "./003_analysis";
 import * as m004 from "./004_whatsapp";
 import * as m005 from "./005_documents";
+import * as m006 from "./006_signatures";
 
 export interface Migration {
   name: string;
   sql: string;
 }
 
-export const migrations: Migration[] = [m001, m002, m003, m004, m005].map((m) => ({ name: m.name, sql: m.sql }));
+export const migrations: Migration[] = [m001, m002, m003, m004, m005, m006].map((m) => ({ name: m.name, sql: m.sql }));

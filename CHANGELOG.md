@@ -2,6 +2,25 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [0.6.0] — Phase 5 — Devis / bon pour accord / signature graphique / tampon — 2026-09-15
+
+### Ajouté
+- Schéma d'extraction étendu pour les devis : `quote_number`, `valid_until`, `subject`, `payment_terms`, `delivery_or_service_date`, `signature_requested` ; garde-fous déterministes : `QUOTE_EXPIRED` (revue humaine), montant absent, société inconnue/ambiguë → `company_id = null`, contrat → « Document contractuel détecté — traitement manuel requis. ».
+- `config/companies.json` : `legalName`, `email`, `quoteApprovalText`, `stampRequired`, `signaturePlacement` (`APPEND_APPROVAL_PAGE` | `OVERLAY_LAST_PAGE` avec coordonnées) ; `settings.signature` (`warningAmount`, `replySubjectPrefix`, `replyTemplate`).
+- `src/documents/assets.ts` (PNG vérifiés : chemin, magic bytes, IHDR, dimensions, 2 Mo), `src/documents/sign-pdf.ts` (pdf-lib, page d'accord ajoutée ou superposition configurée, PDF chiffré/corrompu refusé), `src/documents/sign.ts` (`checkSignatureReadiness`, `prepareQuoteSignature`, `createSignedCopy` idempotente avec empreinte vérifiée, `markSignedDocumentSent`).
+- Exécuteur `sign_document` (`src/actions/executors/signing.ts`) : copie signée → réponse dans le thread avec le seul PDF signé → statuts → `history` ; nouvel essai après échec Graph sans second PDF.
+- Payload `sign_document` déterministe (identifiants, société, fournisseur, référence, montants, texte d'accord, libellés logiques, stratégie de placement, réponse) — jamais de chemin, d'image ni de base64.
+- Orchestrateur : email `DOCUMENT_TO_SIGN` / `signature_requested` + PDF `QUOTE` → action CRITICAL + WhatsApp « 📄 EMA — Devis à signer » (étapes ✓, avertissements expiration / RIB / montant élevé, note « appliquera réellement votre signature enregistrée »).
+- Tool unique `prepare_signed_document({ document_id, company_id })` (modes analyse et chat) ; chat : « J'ai préparé la demande de signature. Une validation est requise. », refus de toute signature automatique.
+- Interface : aperçu « Devis à signer » et « ✅ Devis signé » dans À valider, statuts Documents (À analyser, Analysé, À valider, Refusé, Signé, Envoyé, Échec), onglet « Devis signés », colonne validité, chaîne original → copie signée dans le détail, éditeur Sociétés (texte d'accord, placement, tampon obligatoire).
+- Migration `006_signatures` (`quote_number`, `valid_until`, `subject`, `parent_document_id`, `signed_document_id`, `signed_action_id`, `signed_approval_id`, `sent_at`) ; `todayInTimezone` / `formatDateOnly`.
+- `docs/signatures.md` ; 19 tests (`tests/signing.test.ts`, fixtures PNG/PDF générées en mémoire).
+
+### Modifié
+- Tools `apply_signature` / `apply_stamp` supprimés : l'application de la signature est interne à l'exécuteur.
+- `.gitignore` : motifs `documents/`, `signatures/`, `stamps/`, `signed-documents/`, `tokens/` ancrés à la racine — ils masquaient `src/documents/`, `src/tools/documents/`, `src/tools/signatures/`, `src/app/(app)/documents/` et `src/app/api/documents/`, absents des commits précédents ; ces fichiers sont désormais versionnés.
+- `BUSINESS_RULES.md` §6, `TOOLS.md`, `SECURITY.md`, `ARCHITECTURE.md` §8, `CLAUDE.md` §10, `ROADMAP.md`.
+
 ## [0.5.0] — Phase 4 — Factures / demandes de paiement / acomptes — 2026-09-15
 
 ### Ajouté

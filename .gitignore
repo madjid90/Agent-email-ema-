@@ -8,11 +8,12 @@ data/*
 !data/.gitkeep
 private/*
 !private/.gitkeep
-tokens/
-signatures/
-stamps/
-documents/
-signed-documents/
+# Motifs ancrés à la racine : ne doivent JAMAIS masquer src/documents, src/tools/signatures, etc.
+/tokens/
+/signatures/
+/stamps/
+/documents/
+/signed-documents/
 
 # Configuration réelle du client (seuls les *.example.json sont versionnés)
 config/*.json

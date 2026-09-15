@@ -71,12 +71,17 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Interface : Documents (onglets, recherche, doublons, RIB, PDF sans texte), détail d'un document, pièces jointes analysées dans le détail d'un email, compteurs Aujourd'hui, détails facture dans À valider
 - ✅ Migration `005_documents`, 22 nouveaux tests avec fixtures PDF (pdf-lib) et intégrations mockées, `docs/documents.md`
 
-## PHASE 5 — Devis + signature / tampon ⏳
+## PHASE 5 — Devis + signature graphique / tampon ✅
 
-- Extraction devis, détection société
-- Workflow signature (copie, « Bon pour accord », date, signature, tampon) avec `pdf-lib`
-- Retour du PDF signé dans le thread + archivage
-- Upload signature/tampon dans le setup
+- ✅ Schéma QUOTE étendu (référence, validité, objet, montants, acompte, conditions, `signature_requested`), garde-fous déterministes (expiration `QUOTE_EXPIRED`, montants, société inconnue/ambiguë, RIB, contrat → manuel)
+- ✅ `config/companies.json` : `legalName`, `email`, `quoteApprovalText`, `stampRequired`, `signaturePlacement` ; assets PNG vérifiés dans `private/signatures` et `private/stamps` (`src/documents/assets.ts`)
+- ✅ Service `src/documents/sign.ts` : `checkSignatureReadiness`, `prepareQuoteSignature` (action `sign_document` CRITICAL, idempotente), `createSignedCopy` (idempotente, empreinte vérifiée, nouveau fichier `private/signed-documents/<yyyy>/<mm>/`, ligne `documents` chaînée)
+- ✅ `src/documents/sign-pdf.ts` (pdf-lib) : `APPEND_APPROVAL_PAGE` par défaut, `OVERLAY_LAST_PAGE` avec coordonnées configurées ; PDF chiffré/corrompu refusé
+- ✅ Exécuteur `sign_document` : réponse dans le thread avec le seul PDF signé, statuts `signed` → `signed_and_sent`, retry sans second PDF
+- ✅ Un seul tool `prepare_signed_document` (analyse + chat) ; `apply_signature` / `apply_stamp` supprimés (fonctions internes)
+- ✅ WhatsApp « 📄 EMA — Devis à signer » (étapes ✓, avertissements, note signature réelle) ; UI À valider (aperçu devis, « Valider et signer », « ✅ Devis signé »), Documents (statuts, onglet Devis signés, validité), détail (chaîne original → signé), éditeur Sociétés
+- ✅ Migration `006_signatures`, `docs/signatures.md`, 19 tests
+- ⏳ Reporté : upload de signature/tampon depuis l'interface (dépôt manuel dans `private/` pour l'instant)
 
 ## PHASE 6 — Relances ⏳
 

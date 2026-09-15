@@ -191,6 +191,16 @@ export interface DocumentRow {
   bank_details_change: number;
   analyzed_at: string | null;
   analysis_error: string | null;
+  quote_number: string | null;
+  valid_until: string | null;
+  subject: string | null;
+  /** Copie signée : identifiant du document original. */
+  parent_document_id: string | null;
+  /** Original : identifiant de la copie signée créée. */
+  signed_document_id: string | null;
+  signed_action_id: string | null;
+  signed_approval_id: string | null;
+  sent_at: string | null;
 }
 
 export type HistoryActor = "ema" | "user" | "worker" | "whatsapp" | "system";

@@ -24,7 +24,7 @@
 - Uniquement dans `.env` (jamais dans `config/`, jamais dans SQLite en clair, jamais dans git).
 - `src/lib/env.ts` valide l'env avec zod au démarrage ; les valeurs ne sont jamais logguées.
 - Tokens OAuth Microsoft : chiffrés AES-256-GCM (`src/security/crypto.ts`) avec une clé dérivée d'`APP_SECRET` (scrypt) avant stockage dans `oauth_tokens`.
-- Claude ne reçoit jamais : secrets, tokens, chemins de fichiers de signature/tampon, images de signature/tampon.
+- Claude ne reçoit jamais : secrets, tokens, chemins de fichiers de signature/tampon, images de signature/tampon, base64 de PDF. Pour une signature, il ne manipule que `company_id` ; la résolution `company_id → private/signatures/*.png` se fait dans `createSignedCopy()` **après** la transition `APPROVED → EXECUTING`. Aucun tool `apply_signature` / `apply_stamp` n'est enregistré.
 - Les erreurs renvoyées à Claude ou à l'UI sont assainies (`code` + `message` court).
 
 ## 4. Validation humaine
@@ -45,13 +45,15 @@
 - Mono-utilisateur : mot de passe `APP_PASSWORD`, session cookie signée HMAC (`APP_SECRET`), `HttpOnly`, `Secure` en production, `SameSite=Lax`.
 - Toutes les routes `/api/*` (sauf webhooks et `/api/health`) exigent la session.
 - Nginx en frontal, HTTPS obligatoire, pas d'exposition directe du port 3000.
-- Uploads (signature/tampon) : PNG uniquement, taille max 2 Mo, nom de fichier régénéré, stockage hors du dossier public.
+- Signature / tampon : fichiers PNG déposés manuellement dans `private/signatures/` et `private/stamps/` (jamais dans `public/`), chemins de configuration limités à `^(signatures|stamps)/[\w.-]+\.png$`. À chaque utilisation : taille 1 o – 2 Mo, signature PNG, en-tête IHDR, dimensions 20–4000 px ; SVG, HTML, scripts et fichiers corrompus sont refusés. Les assets n'apparaissent jamais dans les logs, les prompts, WhatsApp ni les réponses d'API.
 
 ## 7. Fichiers et documents
 
 - `private/` n'est jamais servi statiquement ; les PDF sont servis via `/api/documents/[id]/file` après authentification.
 - Les chemins sont construits par `src/lib/paths.ts` (`safeJoin`) : aucun chemin fourni par Claude ou l'utilisateur n'est utilisé tel quel.
-- Un original n'est jamais écrasé.
+- Un original n'est jamais écrasé. La copie signée est un nouveau fichier `private/signed-documents/<yyyy>/<mm>/…-signed-<date>.pdf`, une nouvelle ligne `documents` (`parent_document_id`, `sha256`) ; l'empreinte de l'original est revérifiée avant signature. Un PDF chiffré ou corrompu n'est jamais « signé » par contournement (`ignoreEncryption: false`) : l'action passe en `FAILED`.
+- Retour au fournisseur : réponse dans le thread d'origine avec **une seule pièce jointe**, le PDF signé. Un nouvel essai après échec Graph réutilise la copie existante (pas de second PDF, pas de second envoi).
+- La signature apposée est une image enregistrée : elle n'est jamais présentée comme signature électronique qualifiée ou eIDAS.
 
 ## 8. Journalisation
 

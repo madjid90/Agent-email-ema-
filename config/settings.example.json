@@ -29,5 +29,10 @@
     "reviewThreshold": 0.6,
     "effort": "medium",
     "maxThreadMessages": 8
+  },
+  "signature": {
+    "warningAmount": 10000,
+    "replySubjectPrefix": "Devis signé —",
+    "replyTemplate": "Bonjour,\n\nVeuillez trouver en pièce jointe le devis signé avec notre bon pour accord.\n\nBien cordialement,"
   }
 }

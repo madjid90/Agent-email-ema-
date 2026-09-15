@@ -41,3 +41,18 @@ export function formatAmount(value: number | null | undefined, currency = "EUR",
   if (value === null || value === undefined) return "—";
   return new Intl.NumberFormat(locale, { style: "currency", currency }).format(value);
 }
+
+/** Date du jour (YYYY-MM-DD) dans le fuseau du client. */
+export function todayInTimezone(timezone = "Europe/Paris", now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** Date lisible (JJ/MM/AAAA) dans le fuseau du client. */
+export function formatDateOnly(iso: string | null | undefined, timezone = "Europe/Paris", locale = "fr-FR"): string {
+  if (!iso) return "—";
+  const d = new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat(locale, { timeZone: timezone, day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+}

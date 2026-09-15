@@ -85,17 +85,21 @@ EMA prépare un email **interne** (`send_email`, risque **HIGH**, jamais abaissa
 
 Pour un acompte : montant, pourcentage et total si présents. EMA **ne fait jamais** de virement, ne se connecte à aucune banque, ne saisit aucun IBAN, ne valide aucune dépense et ne considère jamais une facture comme payée (un justificatif de paiement reçu est décrit comme « document présenté comme justificatif »). Un changement de coordonnées bancaires détecté bloque toute action financière et affiche « ⚠️ Changement de coordonnées bancaires détecté — vérification humaine requise ». Validation WhatsApp obligatoire avant tout envoi.
 
-## 6. Devis / signature / tampon
+## 6. Devis / signature graphique / tampon
 
-1. Détecter un devis (PDF joint, mention « devis », « quote », « bon pour accord », « retour signé »).
-2. Extraire : fournisseur, société destinataire, montant, date, référence, objet.
-3. Identifier la société via `config/companies.json` (nom, alias, SIRET si présent). Si ambiguïté → demander à l'utilisateur (pas de choix automatique).
-4. Proposer `sign_document` (CRITICAL) → WhatsApp avec résumé + montant + société + lien PDF.
-5. Après validation : copie du PDF → « Bon pour accord » + date + signataire → signature → tampon → `private/signed-documents/<id>-signed.pdf`.
-6. Répondre dans le thread Outlook avec le PDF signé.
-7. Archiver : `documents.signed_path`, `documents.status = signed_and_sent`, entrée `history`.
+Détails : `docs/signatures.md`. EMA appose une **signature enregistrée** (image) et un tampon sur une copie : jamais présentée comme signature électronique qualifiée, eIDAS ou cryptographique.
 
-L'original n'est jamais modifié.
+1. Seul un document de type `QUOTE` peut entrer dans le workflow. `CONTRACT` → `requires_human_review` + « Document contractuel détecté — traitement manuel requis. ». `BANK_DETAILS`, `INVOICE`, `CREDIT_NOTE`, `PAYMENT_PROOF`, `PURCHASE_ORDER`, `OTHER`, `UNKNOWN` ne sont jamais signés.
+2. Extraire (schéma QUOTE) : fournisseur, référence (`quote_number`), date, `valid_until`, objet, HT/TVA/TTC, acompte, conditions de paiement, société destinataire. Rien n'est inventé : champ absent → `null`.
+3. Garde-fous déterministes : montants non négatifs et cohérents ; montant absent → « Non détecté ⚠️ Vérification recommandée » ; `valid_until` passé → avertissement `QUOTE_EXPIRED` + revue humaine (signature possible après validation explicite) ; société inconnue ou ambiguë → `company_id = null`, **aucune signature** ; changement de RIB → avertissement + revue humaine ; injection suspectée → aucune action.
+4. Société via `config/companies.json` (id, nom, alias). Signature configurée **et** fichier PNG valide présent dans `private/signatures/`, sinon « Signature non configurée pour cette société. » et aucune action. Tampon obligatoire (`stampRequired`) absent → aucune action.
+5. Proposer `sign_document` (CRITICAL, jamais abaissable) → WhatsApp « 📄 EMA — Devis à signer » ou page À valider. **Une seule validation** couvre : bon pour accord (`quoteApprovalText`) + date du jour + signature + tampon + copie signée + retour au fournisseur. Montant ≥ `settings.signature.warningAmount` → avertissement supplémentaire.
+6. Après validation : copie du PDF (`pdf-lib`) → mention d'accord + date serveur (fuseau client) + signataire → image de signature → tampon → `private/signed-documents/<yyyy>/<mm>/<document_id>-…-signed-<date>.pdf`. Placement : `APPEND_APPROVAL_PAGE` par défaut, `OVERLAY_LAST_PAGE` uniquement avec coordonnées explicites en configuration. PDF chiffré ou corrompu → `FAILED`, jamais contourné, jamais l'original envoyé « comme signé ».
+7. Répondre dans le thread Outlook d'origine avec **uniquement** le PDF signé en pièce jointe (texte `settings.signature.replyTemplate`).
+8. Archiver : nouvelle ligne `documents` (catégorie `signed`, `parent_document_id`, empreintes), original `signed_path` / `signed_document_id` / `signed_action_id` / `signed_approval_id`, statuts `signed` → `signed_and_sent`, entrées `history`.
+9. Refus → aucun PDF signé, aucun email. Échec d'envoi après signature → `FAILED` ; le nouvel essai réutilise la copie existante (jamais de second PDF, jamais de second envoi).
+
+L'original n'est jamais modifié. Claude ne manipule que `company_id` ; les chemins et images ne sont résolus qu'après validation, côté serveur.
 
 ## 7. Relances
 

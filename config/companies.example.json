@@ -4,13 +4,26 @@
     {
       "id": "entreprise-x",
       "name": "Entreprise X",
+      "legalName": "Entreprise X SAS",
       "legalForm": "SAS",
       "siret": "",
       "address": "1 rue de l'Exemple, 75000 Paris",
-      "signatory": { "name": "Prénom Nom", "title": "Président" },
+      "email": "contact@entreprise-x.fr",
+      "signatory": {
+        "name": "Prénom Nom",
+        "title": "Président"
+      },
       "signaturePath": "signatures/entreprise-x.png",
       "stampPath": "stamps/entreprise-x.png",
-      "aliases": ["Entreprise X", "ENTREPRISE X SAS"]
+      "quoteApprovalText": "Bon pour accord",
+      "stampRequired": true,
+      "signaturePlacement": {
+        "mode": "APPEND_APPROVAL_PAGE"
+      },
+      "aliases": [
+        "Entreprise X",
+        "ENTREPRISE X SAS"
+      ]
     }
   ]
 }

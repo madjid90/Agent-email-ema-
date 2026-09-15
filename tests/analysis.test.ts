@@ -1,3 +1,4 @@
+import { makeCompany } from "./helpers/config";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openIsolatedDb, type Db } from "@/database/connection";
 import * as emails from "@/database/repositories/emails";
@@ -16,8 +17,8 @@ import { fakeWhatsapp } from "./helpers/fake-whatsapp";
 
 const settings = settingsSchema.parse({ company: { name: "Mon Entreprise", userName: "Madjid", email: "moi@entreprise.fr" }, agent: { signatureText: "Cordialement,\nMadjid" } });
 const companies: Company[] = [
-  { id: "alpha", name: "Alpha SAS", legalForm: "SAS", siret: "", address: "", signatory: { name: "M", title: "Président" }, signaturePath: null, stampPath: null, aliases: ["ALPHA"] },
-  { id: "beta", name: "Beta SARL", legalForm: "SARL", siret: "", address: "", signatory: { name: "M", title: "Gérant" }, signaturePath: null, stampPath: null, aliases: [] },
+  makeCompany({ id: "alpha", name: "Alpha SAS", legalForm: "SAS", signatory: { name: "M", title: "Président" }, aliases: ["ALPHA"] }),
+  makeCompany({ id: "beta", name: "Beta SARL", legalForm: "SARL", signatory: { name: "M", title: "Gérant" } }),
 ];
 const rules: Rule[] = [
   { id: "invoice-brinks", name: "Brink's → Magali", enabled: true, priority: 10, when: { category: "INVOICE", supplierContains: "brink" }, then: { action: "forward", to: "magali@exemple.fr", requiresApproval: true } },

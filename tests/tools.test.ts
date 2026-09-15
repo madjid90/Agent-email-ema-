@@ -1,3 +1,4 @@
+import { makeCompany } from "./helpers/config";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openIsolatedDb, type Db } from "@/database/connection";
 import * as emails from "@/database/repositories/emails";
@@ -10,7 +11,7 @@ function ctx(db: Db, mode: ToolContext["mode"]): ToolContext {
     db,
     settings: settingsSchema.parse({ company: { name: "X", userName: "U", email: "u@x.fr" } }),
     rules: [],
-    companies: [{ id: "entreprise-x", name: "Entreprise X", legalForm: "", siret: "", address: "", signatory: { name: "P", title: "Président" }, signaturePath: null, stampPath: null, aliases: [] }],
+    companies: [makeCompany({ id: "entreprise-x", name: "Entreprise X", signatory: { name: "P", title: "Président" } })],
     contacts: [{ id: "c", name: "Compta", email: "compta@x.fr", role: "Comptabilité", internal: true }],
     mode,
   };
@@ -28,16 +29,15 @@ describe("Couche de tools", () => {
 
   it("enregistre tous les tools prévus par TOOLS.md", () => {
     const names = listTools().map((t) => t.name);
-    for (const n of ["get_new_emails", "get_email", "get_email_thread", "search_emails", "get_attachment", "reply_email", "forward_email", "send_email", "extract_pdf_text", "classify_document", "extract_invoice_data", "extract_quote_data", "archive_document", "search_documents", "get_document", "list_pending_actions", "prepare_payment_request", "prepare_deposit_request", "schedule_followup", "cancel_followup", "check_reply_received", "request_approval", "get_approval_status", "prepare_signed_document", "apply_signature", "apply_stamp"]) {
+    for (const n of ["get_new_emails", "get_email", "get_email_thread", "search_emails", "get_attachment", "reply_email", "forward_email", "send_email", "extract_pdf_text", "classify_document", "extract_invoice_data", "extract_quote_data", "archive_document", "search_documents", "get_document", "list_pending_actions", "prepare_payment_request", "prepare_deposit_request", "schedule_followup", "cancel_followup", "check_reply_received", "request_approval", "get_approval_status", "prepare_signed_document"]) {
       expect(names).toContain(n);
     }
   });
 
   it("n'expose jamais les tools internes à Claude", () => {
     const exposed = toAnthropicTools("analyze").map((t) => t.name);
-    expect(exposed).not.toContain("apply_signature");
-    expect(exposed).not.toContain("apply_stamp");
     expect(exposed).not.toContain("send_whatsapp_notification");
+    expect(exposed).not.toContain("get_new_emails");
     expect(exposed).toContain("reply_email");
     expect(exposed).toContain("prepare_signed_document");
     const def = toAnthropicTools("analyze").find((t) => t.name === "reply_email");
@@ -79,19 +79,23 @@ describe("Couche de tools", () => {
     expect(JSON.parse(row.payload).to).toEqual(["compta@x.fr"]);
   });
 
-  it("prepare_signed_document exige une signature et un tampon configurés", async () => {
+  it("prepare_signed_document refuse un document non analysé / sans signature configurée", async () => {
     const e = emails.insertEmail({ graphId: "g2", subject: "Devis", receivedAt: "2026-09-15T10:00:00.000Z" }, db);
     db.prepare("INSERT INTO documents (id, email_id, name, original_path, created_at) VALUES ('doc_1', ?, 'devis.pdf', 'documents/devis.pdf', '2026-09-15T10:00:00.000Z')").run(e.id);
-    const r = await executeTool("prepare_signed_document", { document_id: "doc_1", company_id: "entreprise-x", email_id: e.id, reply_body: "Ci-joint." }, ctx(db, "analyze"));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.code).toBe("CONFIG");
+    const r = await executeTool("prepare_signed_document", { document_id: "doc_1", company_id: "entreprise-x" }, ctx(db, "analyze"));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const data = r.data as { prepared: boolean; reasons: string[] };
+      expect(data.prepared).toBe(false);
+      expect(data.reasons.length).toBeGreaterThan(0);
+    }
   });
 
   it("les tools renvoient des erreurs assainies (document inconnu, tool interne)", async () => {
     const r = await executeTool("classify_document", { document_id: "doc_x" }, ctx(db, "analyze"));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
-    const internal = await executeTool("apply_signature", { document_id: "doc_x", company_id: "c" }, ctx(db, "analyze"));
+    const internal = await executeTool("send_whatsapp_notification", { text: "x" }, ctx(db, "analyze"));
     expect(internal.ok).toBe(false);
     if (!internal.ok) expect(internal.error.code).toBe("FORBIDDEN");
   });

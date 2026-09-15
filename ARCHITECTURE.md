@@ -126,10 +126,13 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 - Le `button.id` = `approve:<approval_id>` / `reject:<approval_id>`. La modification d'un brouillon se fait depuis l'interface (page À valider).
 - Service `src/integrations/whatsapp/approvals.ts` : notification unique par approval, décision via l'Action Engine (`approveAndExecute` / `rejectAction`), dédoublonnage `webhook_events`, contrôle du numéro autorisé. Détails : `docs/whatsapp.md`.
 
-## 8. Signatures / tampons
+## 8. Signatures / tampons (Phase 5)
 
-- `pdf-lib` copie le PDF original, ajoute sur la dernière page (position configurable par société) : « Bon pour accord », date, nom + fonction du signataire, image signature, image tampon.
-- Claude ne voit que `company_id` ; la résolution des chemins se fait dans `src/tools/signatures/`.
+- `src/documents/sign.ts` : `checkSignatureReadiness()` (QUOTE uniquement, société, assets, expiration, RIB, montant), `prepareQuoteSignature()` (action `sign_document` CRITICAL, idempotente par document), `createSignedCopy()` (idempotente, empreinte de l'original revérifiée, assets chargés depuis `private/`, nouveau fichier `private/signed-documents/<yyyy>/<mm>/`), `markSignedDocumentSent()`.
+- `src/documents/sign-pdf.ts` : `buildSignedPdf()` (pdf-lib, fonction pure). `APPEND_APPROVAL_PAGE` (page d'accord ajoutée) par défaut ; `OVERLAY_LAST_PAGE` uniquement avec coordonnées configurées dans `config/companies.json`.
+- `src/documents/assets.ts` : chargement et vérification des PNG (chemin, magic bytes, IHDR, dimensions, 2 Mo max).
+- `src/actions/executors/signing.ts` : exécuteur `sign_document` — copie signée → réponse dans le thread (`/reply`) avec le seul PDF signé → statuts `signed_and_sent` / `sent` → `history`.
+- Claude ne voit que `company_id` et des libellés logiques ; un seul tool `prepare_signed_document` (crée l'action) ; `apply_signature` / `apply_stamp` n'existent pas comme tools. Détails : `docs/signatures.md`.
 
 ## 9. Déploiement
 

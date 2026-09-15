@@ -12,6 +12,7 @@ import * as actionsRepo from "@/database/repositories/actions";
 import { notifyPendingApproval, type ApprovalDeps } from "@/integrations/whatsapp/approvals";
 import { analyzeEmailDocuments } from "@/documents/analyze";
 import { proposeFinancialActions } from "@/documents/routing";
+import { prepareQuoteSignature } from "@/documents/sign";
 import { emailAnalysisSchema, type EmailAnalysis } from "./schemas";
 import { buildEmailContext, renderTrustedContext, renderUntrustedContext, type ContextDeps } from "./context";
 import { getPrompt, getSystemPrompt } from "./prompts";
@@ -120,6 +121,23 @@ export async function analyzeEmail(emailId: string, deps: AnalyzeDeps = {}): Pro
         emailsRepo.transitionEmailStatus(email.id, ["ANALYZED"], "ACTION_PROPOSED", db);
         actionIds.push(id);
         await notifyPendingApproval(id, { db, settings, ...deps.whatsapp });
+      }
+    }
+
+    // Devis à signer : action CRITICAL (validation obligatoire), société vérifiée, assets contrôlés.
+    const wantsSignature = analysis.category === "DOCUMENT_TO_SIGN" || analysis.recommended_action === "sign_document" || documents.some((d) => d.extraction?.signature_requested);
+    if (wantsSignature && !analysis.injection_suspected) {
+      for (const d of documents) {
+        if (!d.extraction || d.document.doc_type !== "QUOTE" || d.extraction.injection_suspected) {
+          if (d.document.doc_type === "CONTRACT") logHistory({ eventType: "signature.blocked", message: "Document contractuel détecté — traitement manuel requis", actor: "ema", emailId: email.id, documentId: d.document.id }, db);
+          continue;
+        }
+        const r = prepareQuoteSignature(d.document.id, d.document.company_id ?? analysis.company_id, { db, settings, companies, actor: "ema" });
+        if (r.actionId && !r.reused) {
+          emailsRepo.transitionEmailStatus(email.id, ["ANALYZED"], "ACTION_PROPOSED", db);
+          actionIds.push(r.actionId);
+          await notifyPendingApproval(r.actionId, { db, settings, ...deps.whatsapp });
+        } else if (r.actionId) actionIds.push(r.actionId);
       }
     }
 

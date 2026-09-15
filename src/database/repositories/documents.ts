@@ -4,6 +4,7 @@ import type { DocumentCategory, DocumentRow } from "../types";
 import { newId, nowIso } from "@/lib/ids";
 
 export interface NewDocument {
+  parentDocumentId?: string | null;
   emailId?: string | null;
   attachmentId?: string | null;
   name: string;
@@ -20,8 +21,8 @@ export interface NewDocument {
 export function insertDocument(input: NewDocument, db: Db = getDb()): DocumentRow {
   const id = newId("doc");
   db.prepare(
-    `INSERT INTO documents (id, email_id, attachment_id, name, mime_type, size, category, company_id, original_path, stored_name, sha256, status, created_at)
-     VALUES (@id, @email_id, @attachment_id, @name, @mime_type, @size, @category, @company_id, @original_path, @stored_name, @sha256, @status, @created_at)`,
+    `INSERT INTO documents (id, email_id, attachment_id, name, mime_type, size, category, company_id, original_path, stored_name, sha256, status, created_at, parent_document_id)
+     VALUES (@id, @email_id, @attachment_id, @name, @mime_type, @size, @category, @company_id, @original_path, @stored_name, @sha256, @status, @created_at, @parent_document_id)`,
   ).run({
     id,
     email_id: input.emailId ?? null,
@@ -36,6 +37,7 @@ export function insertDocument(input: NewDocument, db: Db = getDb()): DocumentRo
     sha256: input.sha256 ?? null,
     status: input.status ?? "received",
     created_at: nowIso(),
+    parent_document_id: input.parentDocumentId ?? null,
   });
   return getDocument(id, db) as DocumentRow;
 }
@@ -70,6 +72,7 @@ export type DocumentPatch = Partial<
     | "doc_type" | "text_status" | "text_pages" | "supplier_name" | "invoice_number" | "invoice_date" | "due_date"
     | "amount_excl_tax" | "amount_incl_tax" | "currency" | "doc_confidence" | "requires_human_review" | "possible_duplicate"
     | "duplicate_of" | "bank_details_change" | "analyzed_at" | "analysis_error"
+    | "quote_number" | "valid_until" | "subject" | "parent_document_id" | "signed_document_id" | "signed_action_id" | "signed_approval_id" | "sent_at"
   >
 >;
 
@@ -82,6 +85,7 @@ export function updateDocument(id: string, patch: DocumentPatch, db: Db = getDb(
 
 export interface DocumentSearch {
   docType?: string | string[];
+  category?: DocumentCategory;
   supplier?: string;
   invoiceNumber?: string;
   query?: string;
@@ -99,6 +103,10 @@ export function searchDocuments(opts: DocumentSearch = {}, db: Db = getDb()): Do
     clauses.push(`doc_type IN (${types.map((_, i) => `@t${i}`).join(",")})`);
     types.forEach((t, i) => (params[`t${i}`] = t));
   }
+  if (opts.category) {
+    clauses.push("category = @category");
+    params.category = opts.category;
+  }
   if (opts.supplier) {
     clauses.push("lower(supplier_name) LIKE @supplier");
     params.supplier = `%${opts.supplier.toLowerCase()}%`;
@@ -108,7 +116,7 @@ export function searchDocuments(opts: DocumentSearch = {}, db: Db = getDb()): Do
     params.inv = `%${opts.invoiceNumber.toLowerCase()}%`;
   }
   if (opts.query) {
-    clauses.push("(lower(name) LIKE @q OR lower(supplier_name) LIKE @q OR lower(invoice_number) LIKE @q)");
+    clauses.push("(lower(name) LIKE @q OR lower(supplier_name) LIKE @q OR lower(invoice_number) LIKE @q OR lower(quote_number) LIKE @q OR lower(subject) LIKE @q)");
     params.q = `%${opts.query.toLowerCase()}%`;
   }
   if (opts.since) {

@@ -14,6 +14,8 @@ export interface ApprovalCardProps {
   actionError: string | null;
   documentId: string | null;
   whatsappConfigured: boolean;
+  /** Devis : libellés et état après signature. */
+  sign?: { signedDocumentId: string | null; sentTo: string | null; completedAt: string | null } | null;
 }
 
 type Feedback = { tone: "ok" | "danger" | "info"; text: string } | null;
@@ -40,7 +42,7 @@ export function ApprovalCard(p: ApprovalCardProps) {
       return;
     }
     if (kind === "approve" || kind === "retry") {
-      if (json.data?.status === "COMPLETED") setMsg({ tone: "ok", text: "Validé et envoyé." });
+      if (json.data?.status === "COMPLETED") setMsg({ tone: "ok", text: p.sign ? "✅ Devis signé et renvoyé au fournisseur." : "Validé et envoyé." });
       else setMsg({ tone: "danger", text: `Validé mais l'envoi a échoué : ${json.data?.error ?? "erreur inconnue"}. Vous pouvez réessayer.` });
     } else if (kind === "reject") setMsg({ tone: "info", text: "Action refusée. Aucun email envoyé." });
     else if (kind === "notify") setMsg({ tone: json.data?.sent ? "ok" : "danger", text: json.data?.sent ? "Demande envoyée sur WhatsApp." : `Demande non envoyée : ${json.data?.reason ?? "?"}` });
@@ -60,9 +62,22 @@ export function ApprovalCard(p: ApprovalCardProps) {
     return { tone: "warn", text: "En attente" };
   })();
   const pending = p.actionStatus === "WAITING_APPROVAL" || p.actionStatus === "PROPOSED";
+  const approveLabel = p.sign ? "Valider et signer" : "Valider et envoyer";
+  const confirmText = p.sign ? "Appliquer réellement votre signature enregistrée sur une copie du devis et la renvoyer au fournisseur ?" : "Valider et envoyer réellement cet email ?";
 
   return (
     <div className="stack" style={{ marginTop: "0.75rem" }}>
+      {p.sign && p.actionStatus === "COMPLETED" ? (
+        <div className="alert ok">
+          <strong>✅ Devis signé</strong>
+          <div className="form-grid" style={{ marginTop: "0.4rem" }}>
+            <p><span className="muted">Document signé :</span> {p.sign.signedDocumentId ? <a href={`/documents/${p.sign.signedDocumentId}`}>Voir</a> : "—"}</p>
+            <p><span className="muted">Envoyé à :</span> {p.sign.sentTo ?? "—"}</p>
+            <p><span className="muted">Date :</span> {p.sign.completedAt ?? "—"}</p>
+            <p><span className="muted">Action :</span> COMPLETED</p>
+          </div>
+        </div>
+      ) : null}
       <div className="row">
         <span className={`badge ${label.tone}`}>{label.text}</span>
         {pending ? (
@@ -85,12 +100,12 @@ export function ApprovalCard(p: ApprovalCardProps) {
       {p.actionError ? <div className="alert danger">Erreur : {p.actionError}</div> : null}
       {msg ? <div className={`alert ${msg.tone}`}>{msg.text}</div> : null}
       <div className="row">
-        {p.documentId ? <a className="btn" href={`/api/documents/${p.documentId}/file`} target="_blank" rel="noreferrer">Voir PDF</a> : null}
+        {p.documentId ? <a className="btn" href={`/api/documents/${p.documentId}/file`} target="_blank" rel="noreferrer">{p.sign ? "Voir le document original" : "Voir PDF"}</a> : null}
         {pending && p.editable && !editing ? <button className="btn" disabled={busy !== null} onClick={() => setEditing(true)}>Modifier</button> : null}
-        {pending && !editing ? <button className="btn primary" disabled={busy !== null} onClick={() => { if (window.confirm("Valider et envoyer réellement cet email ?")) void call("approve"); }}>{busy === "approve" ? "Envoi…" : "Valider et envoyer"}</button> : null}
+        {pending && !editing ? <button className="btn primary" disabled={busy !== null} onClick={() => { if (window.confirm(confirmText)) void call("approve"); }}>{busy === "approve" ? (p.sign ? "Signature…" : "Envoi…") : approveLabel}</button> : null}
         {pending && !editing ? <button className="btn danger" disabled={busy !== null} onClick={() => void call("reject")}>Refuser</button> : null}
         {pending && !editing && (p.approvalStatus === "EXPIRED" || (!p.notified && p.whatsappConfigured)) ? <button className="btn" disabled={busy !== null} onClick={() => void call("notify")}>{busy === "notify" ? "…" : "Renvoyer la demande"}</button> : null}
-        {p.actionStatus === "FAILED" ? <button className="btn primary" disabled={busy !== null} onClick={() => void call("retry")}>{busy === "retry" ? "…" : "Réessayer l'envoi"}</button> : null}
+        {p.actionStatus === "FAILED" ? <button className="btn primary" disabled={busy !== null} onClick={() => void call("retry")}>{busy === "retry" ? "…" : p.sign?.signedDocumentId ? "Réessayer l'envoi (copie signée conservée)" : "Réessayer"}</button> : null}
       </div>
     </div>
   );

@@ -24,7 +24,7 @@ const ACTION_TITLES: Record<string, string> = {
   send_email: "📩 EMA — Email à valider",
   payment_request: "💳 EMA — Demande de paiement",
   deposit_request: "💳 EMA — Demande d'acompte",
-  sign_document: "✍️ EMA — Signature à valider",
+  sign_document: "📄 EMA — Devis à signer",
   send_followup: "⏰ EMA — Relance à valider",
 };
 const DEFAULT_TITLE = "📩 EMA — Action à valider";
