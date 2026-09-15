@@ -42,7 +42,7 @@ Outlook → Microsoft Graph → EMA (worker) → Contexte (thread + règles + so
       → WhatsApp (validation) → Exécution → Outlook / Documents → Historique
 ```
 
-Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`.
+Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`.
 
 ## 4. Structure du projet
 
@@ -103,7 +103,7 @@ tests/            vitest
 
 - Une seule mailbox : celle connectée via OAuth dans `/setup`. Scopes : `offline_access User.Read Mail.Read Mail.Send` (jamais Mail.ReadWrite : EMA ne modifie aucun email).
 - Toujours répondre **dans le thread** (`conversationId`) via `reply`/`replyAll`, jamais un nouveau mail pour une réponse.
-- Le worker ne traite un email qu'une fois (table `emails`, clé `graph_id` unique).
+- Le worker ne traite un email qu'une fois (table `emails`, clé `graph_id` unique). Cycle : `NEW → ANALYZING → ANALYZED | ANALYSIS_FAILED` ; un échec n'est jamais relancé automatiquement ; un message `CONTEXT` n'est jamais analysé.
 - Les pièces jointes sont téléchargées dans `private/documents/<yyyy>/<mm>/` et référencées dans `documents`.
 - Le refresh token est chiffré en base ; jamais loggué.
 

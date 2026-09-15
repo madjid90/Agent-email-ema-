@@ -5,19 +5,18 @@ import type { Contact, Rule, RulesFile } from "@/lib/config";
 
 const CATEGORIES: { id: string; label: string }[] = [
   { id: "", label: "(toute catégorie)" },
-  { id: "invoice", label: "Facture" },
-  { id: "quote", label: "Devis" },
-  { id: "payment", label: "Paiement" },
-  { id: "deposit", label: "Acompte" },
-  { id: "reminder", label: "Relance reçue" },
-  { id: "administrative", label: "Administratif" },
-  { id: "technical", label: "Technique" },
-  { id: "information", label: "Information" },
-  { id: "urgent", label: "Urgence" },
-  { id: "document_to_sign", label: "Document à signer" },
-  { id: "to_forward", label: "À transférer" },
-  { id: "needs_reply", label: "À répondre" },
-  { id: "other", label: "Autre" },
+  { id: "INVOICE", label: "Facture" },
+  { id: "QUOTE", label: "Devis" },
+  { id: "PAYMENT_REQUEST", label: "Demande de paiement" },
+  { id: "DEPOSIT_REQUEST", label: "Demande d'acompte" },
+  { id: "SUPPLIER_FOLLOWUP", label: "Relance fournisseur" },
+  { id: "ADMIN_REQUEST", label: "Administratif" },
+  { id: "TECHNICAL_REQUEST", label: "Technique" },
+  { id: "INFORMATION", label: "Information" },
+  { id: "URGENT", label: "Urgence" },
+  { id: "DOCUMENT_TO_SIGN", label: "Document à signer" },
+  { id: "FOLLOWUP_REQUIRED", label: "Suivi requis" },
+  { id: "OTHER", label: "Autre" },
 ];
 
 function slug(s: string): string {

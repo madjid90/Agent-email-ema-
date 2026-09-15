@@ -76,12 +76,19 @@ Ces tools ne paient jamais : ils préparent un email interne et créent une acti
 
 `apply_signature` et `apply_stamp` ne sont **pas exposés à Claude** : seul `prepare_signed_document` l'est. L'exécuteur `sign_document` les appelle après validation.
 
+## Analyses (`src/tools/analysis`)
+
+| Tool | Entrée | Sortie | Risque |
+|---|---|---|---|
+| `get_email_analysis` | `{ email_id }` | analyse EMA (catégorie, urgence, résumé, société, montant, action recommandée, brouillon) | LOW |
+| `list_recent_emails` | `{ max?, category?, needs_reply?, since? }` | emails récents avec leur analyse | LOW |
+
 ## Modes d'exposition
 
 | Mode | Tools exposés à Claude |
 |---|---|
 | `analyze` (worker) | lecture Outlook, documents, `schedule_followup`, création d'actions (reply/forward/payment/signature) |
-| `chat` (Chat EMA) | tout `analyze` + `search_emails`, `get_approval_status`, `cancel_followup` |
+| `chat` (Chat EMA) | **phase 2 : lecture seule** — `get_email`, `get_email_thread`, `search_emails`, `get_email_analysis`, `list_recent_emails`, `get_approval_status` (liste `CHAT_READONLY_TOOLS`, `src/agent/chat.ts`). Les tools à effet du mode `chat` seront activés avec la validation (phase 3). |
 | `followup` (worker) | `get_email_thread`, `check_reply_received`, `reply_email`, `cancel_followup` |
 
 ## Contrat d'erreur

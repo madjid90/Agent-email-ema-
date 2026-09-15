@@ -9,7 +9,6 @@ import { createOutlookExecutors } from "./outlook";
  * échouent proprement (NotImplementedError) jusqu'à leur phase.
  */
 const PLANNED_PHASE: Partial<Record<ActionType, string>> = {
-  prepare_reply: "phase 2",
   archive: "phase 4",
   send_followup: "phase 6",
   sign_document: "phase 5",
@@ -26,8 +25,17 @@ function stub(type: ActionType, phase: string): ActionExecutor {
 
 let registered = false;
 
+/** Brouillon de réponse : aucun effet de bord, la trace suffit (phase 2). */
+const prepareReply: ActionExecutor<"prepare_reply"> = {
+  type: "prepare_reply",
+  async execute(payload) {
+    return { ok: true, summary: "Brouillon de réponse préparé (aucun envoi)", data: { chars: payload.body.length } };
+  },
+};
+
 export function registerDefaultExecutors(): void {
   if (registered) return;
+  registerExecutor(prepareReply as ActionExecutor);
   for (const [type, phase] of Object.entries(PLANNED_PHASE) as [ActionType, string][]) registerExecutor(stub(type, phase));
   for (const ex of createOutlookExecutors()) registerExecutor(ex);
   registered = true;

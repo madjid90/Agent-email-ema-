@@ -48,6 +48,13 @@ export function SettingsForm({ initial, onSaved, compact }: { initial: Settings;
             <div className="field"><label>Canal</label><select value={s.approvals.channel} onChange={(e) => setS({ ...s, approvals: { ...s.approvals, channel: e.target.value as Settings["approvals"]["channel"] } })}><option value="whatsapp">WhatsApp</option><option value="ui">Interface uniquement</option></select></div>
             <div className="field"><label>Expiration d&apos;une demande (heures)</label><input type="number" min={1} max={720} value={s.approvals.expireAfterHours} onChange={(e) => setS({ ...s, approvals: { ...s.approvals, expireAfterHours: Number(e.target.value) } })} /></div>
           </div>
+          <h3 style={{ marginTop: "1rem" }}>Analyse Claude</h3>
+          <div className="form-grid">
+            <div className="field"><label>Confiance « fiable » (≥)</label><input type="number" step="0.05" min={0} max={1} value={s.analysis.reliableThreshold} onChange={(e) => setS({ ...s, analysis: { ...s.analysis, reliableThreshold: Number(e.target.value) } })} /></div>
+            <div className="field"><label>Confiance minimale sans validation humaine (≥)</label><input type="number" step="0.05" min={0} max={1} value={s.analysis.reviewThreshold} onChange={(e) => setS({ ...s, analysis: { ...s.analysis, reviewThreshold: Number(e.target.value) } })} /></div>
+            <div className="field"><label>Effort du modèle</label><select value={s.analysis.effort} onChange={(e) => setS({ ...s, analysis: { ...s.analysis, effort: e.target.value as Settings["analysis"]["effort"] } })}><option value="low">Faible (rapide, économique)</option><option value="medium">Moyen</option><option value="high">Élevé</option></select></div>
+            <div className="field"><label>Messages de thread envoyés au modèle (max)</label><input type="number" min={1} max={20} value={s.analysis.maxThreadMessages} onChange={(e) => setS({ ...s, analysis: { ...s.analysis, maxThreadMessages: Number(e.target.value) } })} /></div>
+          </div>
           <h3 style={{ marginTop: "1rem" }}>Boîte mail</h3>
           <div className="form-grid">
             <div className="field"><label>Intervalle de scan (secondes)</label><input type="number" min={15} value={s.mailbox.pollIntervalSeconds} onChange={(e) => setS({ ...s, mailbox: { ...s.mailbox, pollIntervalSeconds: Number(e.target.value) } })} /></div>

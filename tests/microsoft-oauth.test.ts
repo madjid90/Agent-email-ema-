@@ -35,16 +35,16 @@ describe("OAuth Microsoft", () => {
   });
 
   it("échange le code, stocke les tokens chiffrés avec l'adresse", async () => {
-    const { fetchImpl, calls } = fakeFetch([{ match: /POST .*\/oauth2\/v2\.0\/token/, handle: () => json({ access_token: "AT", refresh_token: "RT", expires_in: 3600, scope: "Mail.Read" }) }]);
+    const { fetchImpl, calls } = fakeFetch([{ match: /POST .*\/oauth2\/v2\.0\/token/, handle: () => json({ access_token: "access-token-secret-value", refresh_token: "refresh-token-secret-value", expires_in: 3600, scope: "Mail.Read" }) }]);
     const state = createOAuthState({ db });
-    const r = await completeConnection({ code: "code-1", state }, async (at) => { expect(at).toBe("AT"); return { email: "moi@entreprise.fr", displayName: "Moi" }; }, { db, fetchImpl });
+    const r = await completeConnection({ code: "code-1", state }, async (at) => { expect(at).toBe("access-token-secret-value"); return { email: "moi@entreprise.fr", displayName: "Moi" }; }, { db, fetchImpl });
     expect(r.accountEmail).toBe("moi@entreprise.fr");
     expect((calls[0]?.body as Record<string, string>).grant_type).toBe("authorization_code");
     const row = getToken("microsoft", db);
     expect(row?.account_email).toBe("moi@entreprise.fr");
-    expect(row?.encrypted).not.toContain("AT");
-    expect(row?.encrypted).not.toContain("RT");
-    expect(loadTokenSet(db)?.set.refreshToken).toBe("RT");
+    expect(row?.encrypted).not.toContain("access-token-secret-value");
+    expect(row?.encrypted).not.toContain("refresh-token-secret-value");
+    expect(loadTokenSet(db)?.set.refreshToken).toBe("refresh-token-secret-value");
   });
 
   it("refuse un échange sans refresh token ou refusé par Microsoft", async () => {

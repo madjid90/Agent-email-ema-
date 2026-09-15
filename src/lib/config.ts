@@ -40,28 +40,55 @@ export const settingsSchema = z.object({
       expireAfterHours: z.number().int().min(1).max(720).default(48),
     })
     .default({ channel: "whatsapp", expireAfterHours: 48 }),
+  analysis: z
+    .object({
+      /** ≥ reliable : analyse fiable ; entre review et reliable : avertissement ; < review : validation humaine. */
+      reliableThreshold: z.number().min(0).max(1).default(0.85),
+      reviewThreshold: z.number().min(0).max(1).default(0.6),
+      effort: z.enum(["low", "medium", "high"]).default("medium"),
+      maxThreadMessages: z.number().int().min(1).max(20).default(8),
+    })
+    .default({ reliableThreshold: 0.85, reviewThreshold: 0.6, effort: "medium", maxThreadMessages: 8 }),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
-export const emailCategorySchema = z.enum([
-  "invoice",
-  "quote",
-  "payment",
-  "deposit",
-  "reminder",
-  "administrative",
-  "technical",
-  "information",
-  "urgent",
-  "document_to_sign",
-  "to_forward",
-  "needs_reply",
-  "other",
-]);
+export const EMAIL_CATEGORIES = [
+  "INVOICE",
+  "QUOTE",
+  "PAYMENT_REQUEST",
+  "DEPOSIT_REQUEST",
+  "SUPPLIER_FOLLOWUP",
+  "ADMIN_REQUEST",
+  "TECHNICAL_REQUEST",
+  "INFORMATION",
+  "URGENT",
+  "DOCUMENT_TO_SIGN",
+  "FOLLOWUP_REQUIRED",
+  "OTHER",
+] as const;
+export const emailCategorySchema = z.enum(EMAIL_CATEGORIES);
 export type EmailCategory = z.infer<typeof emailCategorySchema>;
 
+/** Anciennes valeurs (phase 0, minuscules) acceptées dans config/rules.json. */
+const LEGACY_CATEGORIES: Record<string, EmailCategory> = {
+  invoice: "INVOICE",
+  quote: "QUOTE",
+  payment: "PAYMENT_REQUEST",
+  deposit: "DEPOSIT_REQUEST",
+  reminder: "SUPPLIER_FOLLOWUP",
+  administrative: "ADMIN_REQUEST",
+  technical: "TECHNICAL_REQUEST",
+  information: "INFORMATION",
+  urgent: "URGENT",
+  document_to_sign: "DOCUMENT_TO_SIGN",
+  to_forward: "OTHER",
+  needs_reply: "FOLLOWUP_REQUIRED",
+  other: "OTHER",
+};
+const ruleCategorySchema = z.preprocess((v) => (typeof v === "string" && v in LEGACY_CATEGORIES ? LEGACY_CATEGORIES[v] : v), emailCategorySchema);
+
 export const ruleConditionSchema = z.object({
-  category: emailCategorySchema.optional(),
+  category: ruleCategorySchema.optional(),
   supplierContains: z.string().optional(),
   senderDomain: z.string().optional(),
   senderEmail: z.string().optional(),

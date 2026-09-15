@@ -1,32 +1,36 @@
 import Link from "next/link";
-import { Card, CategoryBadge, Empty, StatusBadge, UrgencyBadge } from "@/components/ui";
+import { Card, CategoryBadge, ConfidenceBadge, Empty, StatusBadge, UrgencyBadge, actionLabel } from "@/components/ui";
 import { getDb } from "@/database/connection";
 import { listEmailsWithAnalysis, type EmailWithAnalysis } from "@/database/repositories/analyses";
 import { getSettings, getCompanies } from "@/lib/config";
-import { formatDateTime } from "@/lib/time";
+import { formatDateTime, formatAmount } from "@/lib/time";
 import { getOutlookStatus } from "@/integrations/microsoft";
 import { SyncButton } from "@/components/sync-button";
+import { ReanalyzeButton } from "@/components/reanalyze-button";
 
 export const dynamic = "force-dynamic";
 
-type Tab = "urgent" | "action" | "done" | "info";
+type Tab = "urgent" | "action" | "done" | "info" | "all";
 const TABS: { id: Tab; label: string }[] = [
   { id: "urgent", label: "Urgent" },
   { id: "action", label: "Action requise" },
   { id: "done", label: "Traité" },
   { id: "info", label: "Information" },
+  { id: "all", label: "Tous" },
 ];
 
 function belongs(e: EmailWithAnalysis, tab: Tab): boolean {
   switch (tab) {
     case "urgent":
-      return e.urgency === "high" || e.urgency === "critical" || e.category === "urgent";
+      return e.urgency === "HIGH" || e.urgency === "CRITICAL" || e.category === "URGENT";
     case "action":
-      return e.status === "ACTION_PROPOSED" || e.status === "NEW" || e.status === "ANALYZED";
+      return e.status === "NEW" || e.status === "ANALYZING" || e.status === "ANALYSIS_FAILED" || e.status === "ACTION_PROPOSED" || e.needs_reply === 1 || e.requires_human_review === 1 || (e.recommended_action !== null && e.recommended_action !== "none" && e.recommended_action !== "archive");
     case "done":
-      return e.status === "PROCESSED";
+      return e.status === "PROCESSED" || (e.status === "ANALYZED" && e.needs_reply !== 1 && e.requires_human_review !== 1 && (e.recommended_action === "none" || e.recommended_action === "archive"));
     case "info":
-      return e.category === "information" || e.status === "IGNORED";
+      return e.category === "INFORMATION" || e.status === "IGNORED";
+    case "all":
+      return true;
   }
 }
 
@@ -34,7 +38,8 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const { tab: rawTab } = await searchParams;
   const tab: Tab = TABS.some((t) => t.id === rawTab) ? (rawTab as Tab) : "action";
   const db = getDb();
-  const tz = getSettings().company.timezone;
+  const settings = getSettings();
+  const tz = settings.company.timezone;
   const companies = new Map(getCompanies().map((c) => [c.id, c.name]));
   const emails = listEmailsWithAnalysis({ limit: 300 }, db).filter((e) => belongs(e, tab));
   const outlook = getOutlookStatus(db);
@@ -60,21 +65,27 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         ) : (
           <table>
             <thead>
-              <tr><th>Date</th><th>Expéditeur</th><th>Objet</th><th>Résumé EMA</th><th>Catégorie</th><th>Société</th><th>Action proposée</th><th>Confiance</th><th></th></tr>
+              <tr><th>Date</th><th>Expéditeur</th><th>Objet</th><th>Résumé EMA</th><th>Catégorie / urgence</th><th>Société</th><th>Action demandée</th><th>Action recommandée</th><th>Confiance</th><th></th></tr>
             </thead>
             <tbody>
               {emails.map((e) => (
                 <tr key={e.email_id}>
                   <td className="muted">{formatDateTime(e.received_at, tz)}</td>
                   <td>{e.sender_name ?? e.sender_email ?? "—"}<br /><span className="muted" style={{ fontSize: "0.8rem" }}>{e.sender_email}</span></td>
-                  <td>{e.subject}</td>
-                  <td className="muted">{e.summary ?? "—"}</td>
+                  <td><Link href={`/emails/${e.email_id}`}>{e.subject || "(sans objet)"}</Link><br /><StatusBadge status={e.status} /></td>
+                  <td className="muted">
+                    {e.summary ?? "—"}
+                    {e.requires_human_review === 1 ? <><br /><span className="badge warn">Validation humaine requise</span></> : null}
+                    {e.needs_reply === 1 ? <> <span className="badge primary">Réponse attendue</span></> : null}
+                  </td>
                   <td><CategoryBadge category={e.category} /> <UrgencyBadge urgency={e.urgency} /></td>
-                  <td>{e.company_id ? companies.get(e.company_id) ?? e.company_id : "—"}</td>
-                  <td>{e.recommended_action ?? "—"} <StatusBadge status={e.status} /></td>
-                  <td>{e.confidence !== null ? `${Math.round(e.confidence * 100)} %` : "—"}</td>
-                  <td className="row">
+                  <td>{e.company_id ? companies.get(e.company_id) ?? e.company_id : e.company_name ? <span className="muted">{e.company_name} (non configurée)</span> : "—"}</td>
+                  <td className="muted">{e.requested_action ?? "—"}{e.amount_value !== null ? <><br />{formatAmount(e.amount_value, e.amount_currency ?? "EUR")}</> : null}</td>
+                  <td>{actionLabel(e.recommended_action)}{e.reply_draft ? <><br /><span className="muted" style={{ fontSize: "0.8rem" }}>brouillon prêt</span></> : null}</td>
+                  <td><ConfidenceBadge confidence={e.confidence} reliable={settings.analysis.reliableThreshold} review={settings.analysis.reviewThreshold} /></td>
+                  <td className="stack">
                     <Link className="btn small" href={`/emails/${e.email_id}`}>Voir conversation</Link>
+                    {e.status === "ANALYSIS_FAILED" || e.status === "NEW" ? <ReanalyzeButton emailId={e.email_id} label={e.status === "NEW" ? "Analyser" : "Réanalyser"} small /> : null}
                     {e.status === "ACTION_PROPOSED" ? <Link className="btn small primary" href="/a-valider">Valider action</Link> : null}
                   </td>
                 </tr>

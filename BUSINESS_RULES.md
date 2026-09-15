@@ -4,39 +4,45 @@
 
 | Catégorie (`category`) | Description | Action typique | Risque |
 |---|---|---|---|
-| `invoice` | Facture fournisseur reçue | Extraire les données, transférer selon les règles | MEDIUM |
-| `quote` | Devis reçu (à étudier ou à signer) | Analyser, préparer signature si demandé | CRITICAL si signature |
-| `payment` | Demande de règlement / paiement attendu | Préparer email interne de demande de paiement | HIGH |
-| `deposit` | Demande d'acompte | Préparer email interne de demande d'acompte | HIGH |
-| `reminder` | Relance reçue d'un tiers | Préparer une réponse | MEDIUM |
-| `administrative` | Demande administrative (attestation, document, RH…) | Répondre ou transférer | MEDIUM |
-| `technical` | Demande technique (ERP, IT…) | Transférer au bon contact | MEDIUM |
-| `information` | Information, newsletter, notification | Classer, aucune action | LOW |
-| `urgent` | Urgence explicite | Notifier immédiatement + proposer une action | HIGH |
-| `document_to_sign` | Document à signer / tamponner | Workflow signature | CRITICAL |
-| `to_forward` | Email à transférer à quelqu'un d'autre | Transférer | MEDIUM |
-| `needs_reply` | Email nécessitant une réponse | Préparer une réponse | LOW → MEDIUM à l'envoi |
-| `other` | Non classable | Marquer pour lecture humaine | LOW |
+| `INVOICE` | Facture fournisseur reçue | Extraire les données, transférer selon les règles | MEDIUM |
+| `QUOTE` | Devis reçu (à étudier) | Analyser, préparer signature si demandé | CRITICAL si signature |
+| `PAYMENT_REQUEST` | Règlement attendu, facture non réglée | Préparer email interne de demande de paiement | HIGH |
+| `DEPOSIT_REQUEST` | Demande d'acompte | Préparer email interne de demande d'acompte | HIGH |
+| `SUPPLIER_FOLLOWUP` | Relance reçue d'un tiers | Préparer une réponse | MEDIUM |
+| `ADMIN_REQUEST` | Demande administrative (attestation, document, RH…) | Répondre ou transférer | MEDIUM |
+| `TECHNICAL_REQUEST` | Demande technique (ERP, IT…) | Transférer au bon contact | MEDIUM |
+| `INFORMATION` | Information, newsletter, notification | Classer, aucune action | LOW |
+| `URGENT` | Urgence explicite | Notifier immédiatement + proposer une action | HIGH |
+| `DOCUMENT_TO_SIGN` | Document ou devis à retourner signé | Workflow signature | CRITICAL |
+| `FOLLOWUP_REQUIRED` | L'expéditeur attend un retour de notre part | Préparer une réponse | LOW → MEDIUM à l'envoi |
+| `OTHER` | Non classable | Marquer pour lecture humaine | LOW |
+
+Les anciennes valeurs minuscules de la phase 0 (`invoice`, `payment`…) restent acceptées dans `config/rules.json` et sont converties automatiquement.
 
 ## 2. Structure d'analyse (obligatoire)
 
-Pour chaque email, Claude produit :
+Pour chaque email, Claude produit (schéma zod strict, `src/agent/schemas.ts`) :
 
 ```
-category          : voir tableau ci-dessus
-urgency           : low | medium | high | critical
-summary           : résumé en 1 à 3 phrases, en français
-company           : société concernée (parmi config/companies.json) ou null
-sender            : { name, email, organization? }
-requested_action  : ce que l'expéditeur attend, ou null
-amount            : { value, currency, taxMode: "HT" | "TTC" | "unknown" } ou null
-due_date          : ISO date ou null
-recommended_action: reply | forward | payment_request | deposit_request | sign_document | schedule_followup | archive | none
-confidence        : 0 à 1
-requires_approval : boolean
+category              : voir tableau ci-dessus
+urgency               : LOW | NORMAL | HIGH | CRITICAL
+summary               : synthèse courte en français
+sender                : { name, email, organization }
+company_id            : id de config/companies.json, ou null (absent ou ambigu)
+company_name          : nom vu dans l'email, ou null
+requested_action      : ce que l'expéditeur attend, ou null
+amount / currency     : montant explicite et devise, ou null
+due_date              : YYYY-MM-DD ou null
+needs_reply           : boolean
+recommended_action    : reply | forward | payment_request | deposit_request | sign_document | schedule_followup | archive | none
+confidence            : 0 à 1
+requires_human_review : boolean
+reply_draft           : brouillon complet si needs_reply, sinon null
+reasoning_summary     : justification courte (pas de raisonnement détaillé)
+injection_suspected   : boolean
 ```
 
-**Ne jamais inventer** : un montant, une date, une société ou une référence absente = `null`.
+**Ne jamais inventer** : montant, facture, référence, société, identité, destinataire, date, échéance, décision, contenu d'une pièce jointe = `null` si absent. Plusieurs sociétés possibles → `company_id = null` et `requires_human_review = true`. Confiance insuffisante → `requires_human_review = true`. Détails et garde-fous : `docs/analysis.md`.
 
 ## 3. Niveaux de risque et validation
 
@@ -102,14 +108,14 @@ L'original n'est jamais modifié.
   "name": "Facture Brink's vers Magali",
   "enabled": true,
   "priority": 10,
-  "when": { "category": "invoice", "supplierContains": "brink" },
+  "when": { "category": "INVOICE", "supplierContains": "brink" },
   "then": { "action": "forward", "to": "magali@exemple.fr", "requiresApproval": true }
 }
 ```
 
-Conditions (`when`) : `category`, `supplierContains`, `senderDomain`, `senderEmail`, `subjectContains`, `companyId`, `minAmount`.
+Conditions (`when`) : `category`, `supplierContains` (organisation détectée, adresse ou objet), `senderDomain`, `senderEmail`, `subjectContains`, `companyId`, `minAmount`.
 Effets (`then`) : `forward` (to), `reply_template` (template), `require_approval`, `notify` (message), `ignore`.
-Évaluation : règles triées par `priority` croissante ; la première règle `forward` qui matche gagne ; les règles `require_approval` s'appliquent en plus.
+Évaluation (`src/agent/rules.ts`, en code, jamais par le modèle) : règles triées par `priority` croissante ; la première règle `forward` qui matche décide du destinataire ; les règles `require_approval` s'appliquent en plus. Claude reçoit uniquement les règles compatibles avec l'email (expéditeur, domaine, objet) pour comprendre le contexte.
 
 ## 9. Ton et rédaction
 
@@ -117,4 +123,5 @@ Effets (`then`) : `forward` (to), `reply_template` (template), `require_approval
 - Reprendre le fil du thread (répondre à ce qui est demandé, rien de plus).
 - Signature : `settings.agent.signatureText`.
 - Ne jamais promettre une date de paiement ou un engagement que l'utilisateur n'a pas validé.
-- En cas de doute (confiance < 0.6), proposer plutôt que décider : l'action recommandée est `none` + `requires_approval = true`.
+- En cas de doute (confiance < `settings.analysis.reviewThreshold`, 0,60 par défaut), proposer plutôt que décider : `requires_human_review = true`. Entre 0,60 et 0,85 (`reliableThreshold`), l'interface affiche un avertissement.
+- Si une donnée essentielle manque pour répondre, le brouillon demande une précision au lieu de l'inventer.

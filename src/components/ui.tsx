@@ -43,8 +43,10 @@ const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   SCHEDULED: { label: "Programmée", tone: "primary" },
   CHECKING: { label: "Vérification", tone: "primary" },
   CANCELLED: { label: "Annulée", tone: "" },
-  NEW: { label: "Nouveau", tone: "primary" },
-  ANALYZED: { label: "Analysé", tone: "" },
+  NEW: { label: "À analyser", tone: "primary" },
+  ANALYZING: { label: "Analyse en cours", tone: "primary" },
+  ANALYZED: { label: "Analysé", tone: "ok" },
+  ANALYSIS_FAILED: { label: "Analyse échouée", tone: "danger" },
   ACTION_PROPOSED: { label: "Action proposée", tone: "warn" },
   PROCESSED: { label: "Traité", tone: "ok" },
   IGNORED: { label: "Ignoré", tone: "" },
@@ -59,27 +61,55 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
-  invoice: "Facture",
-  quote: "Devis",
-  payment: "Paiement",
-  deposit: "Acompte",
-  reminder: "Relance reçue",
-  administrative: "Administratif",
-  technical: "Technique",
-  information: "Information",
-  urgent: "Urgence",
-  document_to_sign: "À signer",
-  to_forward: "À transférer",
-  needs_reply: "À répondre",
-  other: "Autre",
+  INVOICE: "Facture",
+  QUOTE: "Devis",
+  PAYMENT_REQUEST: "Demande de paiement",
+  DEPOSIT_REQUEST: "Demande d'acompte",
+  SUPPLIER_FOLLOWUP: "Relance fournisseur",
+  ADMIN_REQUEST: "Administratif",
+  TECHNICAL_REQUEST: "Technique",
+  INFORMATION: "Information",
+  URGENT: "Urgence",
+  DOCUMENT_TO_SIGN: "À signer",
+  FOLLOWUP_REQUIRED: "Suivi requis",
+  OTHER: "Autre",
 };
 export function CategoryBadge({ category }: { category: string | null }) {
   if (!category) return <span className="badge">Non analysé</span>;
   return <span className="badge primary">{CATEGORY_LABEL[category] ?? category}</span>;
 }
 
-const URGENCY_TONE: Record<string, string> = { low: "", medium: "primary", high: "warn", critical: "danger" };
+const URGENCY: Record<string, { tone: string; label: string }> = {
+  LOW: { tone: "", label: "Faible" },
+  NORMAL: { tone: "primary", label: "Normale" },
+  HIGH: { tone: "warn", label: "Haute" },
+  CRITICAL: { tone: "danger", label: "Critique" },
+};
 export function UrgencyBadge({ urgency }: { urgency: string | null }) {
   if (!urgency) return null;
-  return <span className={`badge ${URGENCY_TONE[urgency] ?? ""}`}>{urgency}</span>;
+  const u = URGENCY[urgency] ?? { tone: "", label: urgency };
+  return <span className={`badge ${u.tone}`}>{u.label}</span>;
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  reply: "Répondre",
+  forward: "Transférer",
+  payment_request: "Demande de règlement",
+  deposit_request: "Demande d'acompte",
+  sign_document: "Signer le document",
+  schedule_followup: "Programmer une relance",
+  archive: "Archiver",
+  none: "Aucune",
+};
+export function actionLabel(action: string | null): string {
+  if (!action) return "—";
+  return ACTION_LABEL[action] ?? action;
+}
+
+export function ConfidenceBadge({ confidence, reliable = 0.85, review = 0.6 }: { confidence: number | null; reliable?: number; review?: number }) {
+  if (confidence === null) return <span className="badge">—</span>;
+  const pct = `${Math.round(confidence * 100)} %`;
+  if (confidence >= reliable) return <span className="badge ok">{pct}</span>;
+  if (confidence >= review) return <span className="badge warn" title="Confiance moyenne : vérifier">{pct} ⚠</span>;
+  return <span className="badge danger" title="Confiance faible : validation humaine">{pct}</span>;
 }

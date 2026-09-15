@@ -1,7 +1,13 @@
 /** Types des lignes SQLite (miroir du schéma 001_init). */
 
-/** CONTEXT = importé pour le contexte (thread, recherche), jamais traité comme un nouvel email. */
-export type EmailStatus = "NEW" | "ANALYZED" | "ACTION_PROPOSED" | "PROCESSED" | "IGNORED" | "ERROR" | "CONTEXT";
+/**
+ * Cycle de vie d'un email entrant :
+ * NEW → ANALYZING → ANALYZED | ANALYSIS_FAILED → ACTION_PROPOSED → PROCESSED.
+ * CONTEXT = importé pour le contexte (thread, recherche), jamais analysé comme nouvel email.
+ * Validé côté TypeScript (pas de CHECK SQL depuis 003_analysis).
+ */
+export type EmailStatus = "NEW" | "ANALYZING" | "ANALYZED" | "ANALYSIS_FAILED" | "ACTION_PROPOSED" | "PROCESSED" | "IGNORED" | "ERROR" | "CONTEXT";
+export const EMAIL_STATUSES: readonly EmailStatus[] = ["NEW", "ANALYZING", "ANALYZED", "ANALYSIS_FAILED", "ACTION_PROPOSED", "PROCESSED", "IGNORED", "ERROR", "CONTEXT"];
 export type EmailDirection = "inbound" | "outbound";
 
 export interface EmailRow {
@@ -28,7 +34,7 @@ export interface EmailRow {
   updated_at: string;
 }
 
-export type Urgency = "low" | "medium" | "high" | "critical";
+export type Urgency = "LOW" | "NORMAL" | "HIGH" | "CRITICAL";
 
 export interface EmailAnalysisRow {
   id: string;
@@ -37,17 +43,42 @@ export interface EmailAnalysisRow {
   urgency: Urgency;
   summary: string;
   company_id: string | null;
+  company_name: string | null;
   sender_json: string;
   requested_action: string | null;
   amount_value: number | null;
   amount_currency: string | null;
   amount_tax_mode: string | null;
   due_date: string | null;
+  needs_reply: number;
   recommended_action: string;
   confidence: number;
+  /** Colonne historique (phase 0) : toujours égale à requires_human_review. */
   requires_approval: number;
+  requires_human_review: number;
+  reply_draft: string | null;
+  reasoning_summary: string | null;
+  injection_suspected: number;
+  matched_rules: string; // JSON string[]
+  forward_to: string | null;
   raw_json: string;
   model: string | null;
+  created_at: string;
+}
+
+export interface LlmRunRow {
+  id: string;
+  email_id: string | null;
+  operation: string;
+  model: string;
+  status: "ok" | "error";
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_creation_tokens: number | null;
+  duration_ms: number;
+  stop_reason: string | null;
+  error: string | null;
   created_at: string;
 }
 

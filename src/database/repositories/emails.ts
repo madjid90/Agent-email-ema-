@@ -90,6 +90,24 @@ export function updateEmailStatus(id: string, status: EmailStatus, db: Db = getD
   db.prepare("UPDATE emails SET status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), id);
 }
 
+/** Transition conditionnelle (idempotence : un seul process analyse un email). */
+export function transitionEmailStatus(id: string, from: EmailStatus[], to: EmailStatus, db: Db = getDb()): boolean {
+  const params: Record<string, unknown> = { id, to, now: nowIso() };
+  from.forEach((s, i) => (params[`f${i}`] = s));
+  const res = db.prepare(`UPDATE emails SET status = @to, updated_at = @now WHERE id = @id AND status IN (${from.map((_, i) => `@f${i}`).join(",")})`).run(params);
+  return res.changes === 1;
+}
+
+/** Emails entrants en attente d'analyse, du plus ancien au plus récent. */
+export function listPendingAnalysis(limit = 5, db: Db = getDb()): EmailRow[] {
+  return db.prepare("SELECT * FROM emails WHERE status = 'NEW' AND direction = 'inbound' ORDER BY received_at ASC LIMIT ?").all(limit) as EmailRow[];
+}
+
+/** Analyses bloquées (process interrompu) → ANALYSIS_FAILED, jamais relancées automatiquement. */
+export function failStaleAnalyzing(olderThanIso: string, db: Db = getDb()): number {
+  return db.prepare("UPDATE emails SET status = 'ANALYSIS_FAILED', updated_at = ? WHERE status = 'ANALYZING' AND updated_at < ?").run(nowIso(), olderThanIso).changes;
+}
+
 /** Met à jour les champs volatils d'un email déjà connu (lu/non lu, dossier). */
 export function touchEmail(id: string, patch: { isRead?: boolean; folder?: string | null }, db: Db = getDb()): void {
   const sets: string[] = ["updated_at = @now"];

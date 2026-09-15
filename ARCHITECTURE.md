@@ -43,11 +43,14 @@ Process Node autonome (PM2 `ema-worker`). Boucle simple :
 Chaque tâche est protégée par un verrou SQLite (`worker_locks`) pour éviter deux workers concurrents.
 
 ### 3.3 Agent (`src/agent`)
-- `ema.md` : prompt système (rôle, catégories, ton, limites, quand demander validation).
-- `prompts/` : templates (analyse, réponse, relance, chat).
-- `context.ts` : construction du contexte borné (jamais toute la mailbox).
+- `ema.md` : prompt système (rôle, catégories, ton, limites, quand demander validation). Stable, mis en cache.
+- `prompts/` : templates (analyse, relance, chat).
+- `context.ts` : Context Engine — contexte borné, données fiables séparées du contenu non fiable encapsulé (jamais toute la mailbox).
 - `schemas.ts` : `EmailAnalysis` (zod) = sortie structurée obligatoire.
-- `orchestrator.ts` : boucle tool calling avec Claude, garde-fous (max tours, tools autorisés par mode).
+- `rules.ts` : moteur de règles déterministe (`config/rules.json`), destinataires de transfert.
+- `orchestrator.ts` : `analyzeEmail()` (Claude en sortie structurée, garde-fous, règles, persistance, statuts) et `analyzePendingEmails()` (worker).
+- `chat.ts` : Chat EMA, boucle tool calling bornée, outils de lecture uniquement en phase 2.
+Détails : `docs/analysis.md`.
 
 ### 3.4 Tools (`src/tools`)
 Définis par `defineTool()` : nom, description, `input` (zod), `output` (zod), `riskLevel`, `handler`. Le registre (`src/tools/registry.ts`) expose les définitions JSON Schema à Claude et exécute les appels après validation. Voir `TOOLS.md`.
@@ -89,6 +92,7 @@ Voir section 4.
 | `worker_locks` | Verrous d'exécution du worker |
 | `settings_kv` | Paires clé/valeur runtime (dernier scan, état setup) |
 | `chat_messages` | Historique du Chat EMA |
+| `llm_runs` | Journal des appels Claude (modèle, tokens, durée, issue), sans contenu |
 
 Les **règles**, **sociétés**, **contacts** et **paramètres** sont dans `config/*.json` (source de vérité éditable via l'UI et par le client en SSH). SQLite ne stocke que des données de fonctionnement.
 

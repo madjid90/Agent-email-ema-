@@ -2,6 +2,8 @@ import { expireApprovals } from "@/actions/engine";
 import { listDueFollowups } from "@/database/repositories/followups";
 import { kvSet } from "@/database/repositories/kv";
 import { createConnectedGraphClient, isOutlookConnected, syncInbox } from "@/integrations/microsoft";
+import { analyzePendingEmails } from "@/agent/orchestrator";
+import { getConfiguredIntegrations } from "@/lib/env";
 import { nowIso } from "@/lib/ids";
 import { createLogger } from "@/lib/logger";
 import type { WorkerTask } from "./scheduler";
@@ -20,8 +22,26 @@ export const scanMailboxTask = (intervalSeconds: number): WorkerTask => ({
     }
     const result = await syncInbox(createConnectedGraphClient());
     if (result.inserted > 0 || result.errors.length > 0) log.info("scan_mailbox done", { inserted: result.inserted, attachments: result.attachments, pages: result.pages, errors: result.errors.length });
+    if (result.inserted > 0) await runAnalysis(result.inserted);
   },
 });
+
+async function runAnalysis(limit: number): Promise<void> {
+  if (!getConfiguredIntegrations().anthropic) {
+    log.debug("analyze_emails: ANTHROPIC_API_KEY absente");
+    return;
+  }
+  const r = await analyzePendingEmails(limit);
+  if (r.attempted > 0 || r.staleFailed > 0) log.info("analyze_emails done", { attempted: r.attempted, succeeded: r.succeeded, failed: r.failed, staleFailed: r.staleFailed });
+}
+
+/** Analyse Claude des emails NEW (rattrapage entre deux scans, jamais les ANALYSIS_FAILED). */
+export const analyzeEmailsTask: WorkerTask = {
+  name: "analyze_emails",
+  intervalSeconds: 60,
+  lockTtlSeconds: 600,
+  run: () => runAnalysis(5),
+};
 
 /** Relances échues (phase 6) : liste les relances dues et journalise. */
 export const processFollowupsTask: WorkerTask = {

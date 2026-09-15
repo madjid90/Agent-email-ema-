@@ -31,13 +31,19 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Worker : `scan_mailbox` réel ; routes `/api/integrations/microsoft/*` ; panneau Outlook (Setup + Paramètres), bouton Synchroniser (Emails)
 - ✅ 28 tests Microsoft/Outlook avec Graph mocké, `docs/outlook.md`
 
-## PHASE 2 — Claude + compréhension email ⏳
+## PHASE 2 — Claude + compréhension email ✅
 
-- Context builder (thread, historique pertinent, règles, sociétés)
-- Orchestrator avec structured outputs → `EmailAnalysis`
-- Préparation de réponse (brouillon) → action `reply_email` PROPOSED
-- Page Aujourd'hui + Emails avec résumé, catégorie, confiance
-- Chat EMA (mode `chat`, tools de lecture)
+- ✅ Intégration Anthropic réelle (`src/integrations/anthropic/structured.ts`) : sortie structurée zod, timeout, retries SDK limités, erreurs typées (`LlmError`), journal `llm_runs` (tokens, durée, erreur) sans contenu ni clé
+- ✅ Context Engine borné : email, thread (statut `CONTEXT` inclus), sociétés, contacts, règles présélectionnées, pièces jointes (métadonnées), analyses précédentes ; séparation explicite fiable / non fiable
+- ✅ Schéma d'analyse strict (12 catégories, urgence, montant, échéance, needs_reply, recommended_action, confiance, requires_human_review, reply_draft, reasoning_summary, injection_suspected)
+- ✅ Garde-fous anti-hallucination : société vérifiée en code, seuils de confiance configurables, actions sensibles toujours revues, injection neutralisée (heuristique + modèle)
+- ✅ Moteur de règles déterministe (`config/rules.json`) : destinataire de transfert issu de la configuration, jamais du modèle
+- ✅ Worker : `scan_mailbox` → analyse des nouveaux emails, `analyze_emails` de rattrapage, statuts NEW/ANALYZING/ANALYZED/ANALYSIS_FAILED, jamais de relance automatique après échec, analyses bloquées libérées
+- ✅ Brouillon de réponse matérialisé par une action `prepare_reply` (LOW, sans effet) — aucun email envoyé
+- ✅ Réanalyse manuelle (`POST /api/emails/{id}/analyze`, boutons UI)
+- ✅ Interface : Emails (résumé, catégorie, urgence, société, actions, confiance, validation humaine, brouillon), détail d'email, Aujourd'hui, Paramètres (seuils)
+- ✅ Chat EMA lecture seule (Claude + outils de lecture, boucle bornée)
+- ✅ Migration `003_analysis`, 28 nouveaux tests (Anthropic mocké, injection testée), `docs/analysis.md`
 
 ## PHASE 3 — WhatsApp + validation ⏳
 

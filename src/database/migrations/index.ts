@@ -5,10 +5,11 @@
  */
 import * as m001 from "./001_init";
 import * as m002 from "./002_outlook";
+import * as m003 from "./003_analysis";
 
 export interface Migration {
   name: string;
   sql: string;
 }
 
-export const migrations: Migration[] = [m001, m002].map((m) => ({ name: m.name, sql: m.sql }));
+export const migrations: Migration[] = [m001, m002, m003].map((m) => ({ name: m.name, sql: m.sql }));

@@ -2,6 +2,26 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [0.3.0] — Phase 2 — Claude / compréhension des emails — 2026-09-15
+
+### Ajouté
+- Intégration Anthropic réelle : `runStructured()` (sortie structurée zod via `messages.parse`, prompt système mis en cache, effort configurable), `LlmError` typée (auth, rate_limit, transient, timeout, invalid_response, refusal, not_found), journal `llm_runs`.
+- Context Engine (`src/agent/context.ts`) : contexte borné et structuré en données fiables / contenu non fiable encapsulé ; thread, sociétés, contacts, règles présélectionnées, pièces jointes, analyses précédentes du même expéditeur.
+- Schéma d'analyse `EmailAnalysis` (catégories `INVOICE`… `OTHER`, urgence `LOW`… `CRITICAL`, montant/devise, `needs_reply`, `requires_human_review`, `reply_draft`, `reasoning_summary`, `injection_suspected`) et garde-fous `applyGuards()`.
+- Moteur de règles `src/agent/rules.ts` (évaluation en code, destinataire de transfert issu de la configuration, présélection avant analyse).
+- Orchestrateur `analyzeEmail()` / `analyzePendingEmails()` : transition atomique `NEW → ANALYZING → ANALYZED | ANALYSIS_FAILED`, réanalyse forcée, action `prepare_reply` sans effet, historique.
+- Chat EMA (`src/agent/chat.ts`) : Claude avec outils de lecture uniquement, boucle bornée ; tools `get_email_analysis`, `list_recent_emails`.
+- Worker : tâche `analyze_emails`, analyse déclenchée après chaque scan.
+- Routes `POST /api/emails/{id}/analyze` (réanalyse), `GET /api/emails/{id}/analysis`, `POST /api/chat` réel.
+- Interface : analyses réelles dans Emails, détail d'email (carte d'analyse, brouillon, justification, règles, appels Claude), Aujourd'hui (compteurs et priorités issus des analyses), Paramètres (seuils de confiance, effort, taille du thread), boutons Analyser / Réanalyser.
+- Migration `003_analysis` : statuts d'analyse, `email_analyses` reconstruite (nouvelles colonnes, catégories en majuscules), table `llm_runs`.
+- `settings.analysis` (`reliableThreshold`, `reviewThreshold`, `effort`, `maxThreadMessages`), `docs/analysis.md`, 28 nouveaux tests avec Anthropic mocké (dont prompt injection, réponse invalide, timeout, 429, doublon, CONTEXT ignoré, réanalyse).
+
+### Modifié
+- Catégories d'emails en majuscules dans `config/rules.json` (anciennes valeurs converties automatiquement), `BUSINESS_RULES.md`, `TOOLS.md`.
+- `emails.status` sans contrainte CHECK SQL (validation TypeScript).
+- Mode `chat` des tools restreint à la lecture (`CHAT_READONLY_TOOLS`) jusqu'à la phase 3.
+
 ## [0.2.0] — Phase 1 — Outlook / Microsoft Graph — 2026-09-15
 
 ### Ajouté

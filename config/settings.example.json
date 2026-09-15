@@ -9,7 +9,10 @@
   "mailbox": {
     "pollIntervalSeconds": 120,
     "maxEmailsPerScan": 25,
-    "ignoreFolders": ["Junk Email", "Deleted Items"]
+    "ignoreFolders": [
+      "Junk Email",
+      "Deleted Items"
+    ]
   },
   "agent": {
     "signatureText": "Cordialement,\nPrénom Nom",
@@ -20,5 +23,11 @@
   "approvals": {
     "channel": "whatsapp",
     "expireAfterHours": 48
+  },
+  "analysis": {
+    "reliableThreshold": 0.85,
+    "reviewThreshold": 0.6,
+    "effort": "medium",
+    "maxThreadMessages": 8
   }
 }

@@ -6,56 +6,109 @@
       "name": "Facture Brink's vers Magali",
       "enabled": true,
       "priority": 10,
-      "when": { "category": "invoice", "supplierContains": "brink" },
-      "then": { "action": "forward", "to": "magali@exemple.fr", "requiresApproval": true }
+      "when": {
+        "category": "INVOICE",
+        "supplierContains": "brink"
+      },
+      "then": {
+        "action": "forward",
+        "to": "magali@exemple.fr",
+        "requiresApproval": true
+      }
     },
     {
       "id": "invoice-default",
       "name": "Facture fournisseur classique vers Nabila",
       "enabled": true,
       "priority": 100,
-      "when": { "category": "invoice" },
-      "then": { "action": "forward", "to": "nabila@exemple.fr", "requiresApproval": true }
+      "when": {
+        "category": "INVOICE"
+      },
+      "then": {
+        "action": "forward",
+        "to": "nabila@exemple.fr",
+        "requiresApproval": true
+      }
     },
     {
       "id": "payroll",
       "name": "Paie vers Julie",
       "enabled": true,
       "priority": 20,
-      "when": { "subjectContains": "paie" },
-      "then": { "action": "forward", "to": "julie@exemple.fr", "requiresApproval": true }
+      "when": {
+        "subjectContains": "paie"
+      },
+      "then": {
+        "action": "forward",
+        "to": "julie@exemple.fr",
+        "requiresApproval": true
+      }
     },
     {
       "id": "hr",
       "name": "RH vers Solène",
       "enabled": true,
       "priority": 20,
-      "when": { "category": "administrative", "subjectContains": "rh" },
-      "then": { "action": "forward", "to": "solene@exemple.fr", "requiresApproval": true }
+      "when": {
+        "category": "ADMIN_REQUEST",
+        "subjectContains": "rh"
+      },
+      "then": {
+        "action": "forward",
+        "to": "solene@exemple.fr",
+        "requiresApproval": true
+      }
     },
     {
       "id": "erp",
       "name": "ERP vers Khalil",
       "enabled": true,
       "priority": 20,
-      "when": { "category": "technical", "subjectContains": "erp" },
-      "then": { "action": "forward", "to": "khalil@exemple.fr", "requiresApproval": true }
+      "when": {
+        "category": "TECHNICAL_REQUEST",
+        "subjectContains": "erp"
+      },
+      "then": {
+        "action": "forward",
+        "to": "khalil@exemple.fr",
+        "requiresApproval": true
+      }
     },
     {
       "id": "payment-approval",
       "name": "Paiement : validation obligatoire",
       "enabled": true,
       "priority": 1,
-      "when": { "category": "payment" },
-      "then": { "action": "require_approval" }
+      "when": {
+        "category": "PAYMENT_REQUEST"
+      },
+      "then": {
+        "action": "require_approval"
+      }
     },
     {
       "id": "signature-approval",
       "name": "Signature : validation obligatoire",
       "enabled": true,
       "priority": 1,
-      "when": { "category": "document_to_sign" },
-      "then": { "action": "require_approval" }
+      "when": {
+        "category": "DOCUMENT_TO_SIGN"
+      },
+      "then": {
+        "action": "require_approval"
+      }
+    },
+    {
+      "id": "deposit-approval",
+      "name": "Acompte : validation obligatoire",
+      "enabled": true,
+      "priority": 1,
+      "when": {
+        "category": "DEPOSIT_REQUEST"
+      },
+      "then": {
+        "action": "require_approval"
+      }
     }
   ]
 }
