@@ -119,7 +119,7 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Sauvegarde cohérente (better-sqlite3, `integrity_check`), métadonnées `backup.json`, rétention 7, restauration testée en conditions réelles
 - ✅ Journaux : tokens, mots de passe et chemins d'assets masqués ; adresses email et numéros masqués ; erreurs techniques remplacées par un message lisible
 - ✅ Documentation : déploiement complet, `client-onboarding.md`, `pilot-checklist.md`, `privacy.md`, `e2e-report.md`
-- ✅ Installation neuve validée (clone, `npm ci`, migrations, doctor, build, démarrage, sécurité, import, sauvegarde/restauration) ; 242 tests
+- ✅ Installation neuve validée (clone, `npm ci`, migrations, doctor, build, démarrage, sécurité, import, sauvegarde/restauration) ; 243 tests
 - ⏳ Reporté : tests E2E avec credentials réels (Microsoft, Anthropic, Meta) et VPS — à cocher à la mise en service (`docs/e2e-report.md`)
 
 ## V2 — fonctionnalités reportées (hors périmètre V1)

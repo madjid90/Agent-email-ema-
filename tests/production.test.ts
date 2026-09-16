@@ -274,6 +274,48 @@ describe("Sécurité HTTP et sauvegarde", () => {
     expect(csp).toContain("default-src 'self'");
   });
 
+  it("sauvegarde puis restauration : l'archive source n'est jamais écrasée et les données reviennent", () => {
+    // Squelette d'installation EMA dans un dossier temporaire (scripts réels, node_modules partagé).
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ema-install-"));
+    fs.mkdirSync(path.join(root, "data"));
+    fs.mkdirSync(path.join(root, "config"));
+    fs.mkdirSync(path.join(root, "private", "documents"), { recursive: true });
+    fs.mkdirSync(path.join(root, "scripts"));
+    for (const f of ["backup.sh", "restore.sh", "db-snapshot.cjs"]) fs.copyFileSync(path.join("scripts", f), path.join(root, "scripts", f));
+    fs.copyFileSync("package.json", path.join(root, "package.json"));
+    fs.symlinkSync(path.resolve("node_modules"), path.join(root, "node_modules"), "dir");
+    fs.writeFileSync(path.join(root, ".env"), ["DATABASE_PATH=./data/ema.db", "PRIVATE_STORAGE_PATH=./private", "CONFIG_PATH=./config", ""].join("\n"));
+    fs.writeFileSync(path.join(root, "config", "settings.json"), JSON.stringify({ version: 1 }));
+    fs.writeFileSync(path.join(root, "private", "documents", "facture.pdf"), "%PDF-1.4 test");
+    const source = new Database(path.join(root, "data", "ema.db"));
+    source.pragma("journal_mode = WAL");
+    source.exec("CREATE TABLE emails (id TEXT PRIMARY KEY)");
+    source.prepare("INSERT INTO emails (id) VALUES ('e1')").run();
+    source.close();
+
+    execFileSync("bash", ["scripts/backup.sh"], { cwd: root, encoding: "utf8" });
+    const archives = fs.readdirSync(path.join(root, "backups")).filter((f) => f.startsWith("ema-backup-"));
+    expect(archives).toHaveLength(1);
+    const archive = path.join(root, "backups", archives[0] as string);
+
+    // Effacement puis restauration
+    fs.rmSync(path.join(root, "private", "documents"), { recursive: true, force: true });
+    fs.rmSync(path.join(root, "config", "settings.json"));
+    fs.rmSync(path.join(root, "data", "ema.db"));
+    const out = execFileSync("bash", ["scripts/restore.sh", archive], { cwd: root, encoding: "utf8" });
+
+    // L'archive restaurée existe toujours (la sauvegarde de sécurité ne l'écrase pas)
+    expect(fs.existsSync(archive)).toBe(true);
+    expect(fs.readdirSync(path.join(root, "backups")).some((f) => f.startsWith("pre-restore-"))).toBe(true);
+    expect(out).toContain("Intégrité SQLite après restauration : ok");
+    expect(fs.readFileSync(path.join(root, "private", "documents", "facture.pdf"), "utf8")).toBe("%PDF-1.4 test");
+    expect(fs.existsSync(path.join(root, "config", "settings.json"))).toBe(true);
+    const restored = new Database(path.join(root, "data", "ema.db"), { readonly: true });
+    expect((restored.prepare("SELECT COUNT(*) AS c FROM emails").get() as { c: number }).c).toBe(1);
+    restored.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   it("la copie de sauvegarde est cohérente, vérifiée et compte les lignes", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ema-backup-"));
     const source = path.join(dir, "source.db");

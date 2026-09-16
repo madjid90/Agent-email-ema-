@@ -10,6 +10,7 @@ Périmètre fonctionnel V1 gelé : aucune nouvelle fonctionnalité métier, hors
 - **Bloquant** : le worker PM2 et les scripts (`db:migrate`, `doctor`) ne chargeaient jamais `.env` — seul Next.js le fait. En production, le worker aurait démarré sans clé Anthropic, sans `APP_SECRET` (donc incapable de déchiffrer les tokens Outlook) et sans token WhatsApp. Chargement ajouté dans `src/lib/dotenv.ts`, appelé par `getEnv()`, sans écraser les variables déjà définies.
 - Les erreurs techniques (SQLite, système de fichiers, exceptions JavaScript) remontaient jusqu'à l'interface ; elles sont remplacées par un message lisible, le détail restant dans les journaux.
 - `APP_URL` en `http://` en production était accepté : le démarrage est désormais refusé (message explicite, `.env.example` commenté).
+- **Perte de données possible** : `restore.sh` créait sa sauvegarde de sécurité dans `backups/` puis renommait la dernière archive ; quand l'archive à restaurer se trouvait dans ce dossier avec le même horodatage à la seconde près, elle était écrasée et la restauration échouait sans rien restaurer. L'archive source est désormais copiée avant toute écriture et la sauvegarde de sécurité est écrite sous un nom distinct (`pre-restore-*`), sans renommer aucune archive existante. Test de non-régression ajouté (cycle sauvegarde → restauration complet).
 - La sauvegarde dépendait du binaire `sqlite3` et retombait sinon sur une copie non cohérente ; elle utilise l'API `backup` de better-sqlite3, vérifie l'intégrité et échoue proprement.
 
 ### Ajouté
@@ -24,7 +25,7 @@ Périmètre fonctionnel V1 gelé : aucune nouvelle fonctionnalité métier, hors
 - Journaux : masquage des adresses email et des numéros, clés sensibles élargies (cookie, session, credential, chemins d'assets).
 - Documentation : `docs/client-onboarding.md`, `docs/pilot-checklist.md`, `docs/privacy.md` (flux de données, export, suppression), `docs/e2e-report.md` (matrice PASS / NOT TESTED), `docs/deployment.md` complété (droits, diagnostic, supervision, rotation des journaux, rétention, vérification d'installation neuve).
 - `ROADMAP.md` : section V2 des fonctionnalités reportées.
-- 18 nouveaux tests (242 au total) : validation d'environnement, chargement `.env`, limitation de connexion, session et cookie falsifié, masquage des journaux, messages d'erreur, import d'asset, traversée de chemin, droits, diagnostic, coûts, en-têtes, sauvegarde.
+- 19 nouveaux tests (243 au total) : validation d'environnement, chargement `.env`, limitation de connexion, session et cookie falsifié, masquage des journaux, messages d'erreur, import d'asset, traversée de chemin, droits, diagnostic, coûts, en-têtes, sauvegarde.
 
 ### Vérifié
 - Installation neuve complète dans un dossier vierge : `npm ci`, `.env`, migrations, `doctor`, `build`, démarrage, authentification, limitation de connexion, import de signature, traversée de chemin, sauvegarde et restauration réelles.

@@ -46,7 +46,7 @@ Date : 16/09/2026 · Version : 1.0.0 · Environnement de vérification : machine
 
 ## 2. Couverture automatisée
 
-242 tests (`npm run check` vert) : base de données, Action Engine, configuration, sécurité, tools, contexte, Graph (client, OAuth, synchronisation, exécuteurs), analyse, règles, chat, WhatsApp, documents, signature, assistant WhatsApp, relances, production.
+243 tests (`npm run check` vert) : base de données, Action Engine, configuration, sécurité, tools, contexte, Graph (client, OAuth, synchronisation, exécuteurs), analyse, règles, chat, WhatsApp, documents, signature, assistant WhatsApp, relances, production.
 
 Aucun test n'utilise de credentials réels : Microsoft, Anthropic et WhatsApp sont simulés ; les PDF et les PNG sont générés en mémoire.
 

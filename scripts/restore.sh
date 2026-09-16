@@ -15,14 +15,26 @@ if [ -f "$ROOT/.env" ]; then
 fi
 cd "$ROOT"
 
-# Sauvegarde de sécurité de l'état courant
-"$ROOT/scripts/backup.sh" "$ROOT/backups" >/dev/null 2>&1 && echo "État courant sauvegardé dans backups/ (pre-restore)"
-LAST="$(ls -t "$ROOT/backups"/ema-backup-*.tar.gz 2>/dev/null | head -1 || true)"
-[ -n "$LAST" ] && mv "$LAST" "${LAST/ema-backup/pre-restore}" || true
-
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-tar -xzf "$ARCHIVE" -C "$WORK"
+
+# L'archive à restaurer est copiée AVANT toute écriture : la sauvegarde de
+# sécurité ci-dessous écrit dans backups/ et ne doit jamais pouvoir l'écraser.
+cp "$ARCHIVE" "$WORK/source.tar.gz"
+
+# Sauvegarde de sécurité de l'état courant, écrite hors de backups/ puis déposée
+# sous un nom distinct (pre-restore-*), sans renommer aucune archive existante.
+SAFE="$WORK/safety"
+mkdir -p "$SAFE" "$ROOT/backups"
+if "$ROOT/scripts/backup.sh" "$SAFE" --keep 0 >/dev/null 2>&1; then
+  SAFE_FILE="$(ls -t "$SAFE"/ema-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+  if [ -n "$SAFE_FILE" ]; then
+    mv "$SAFE_FILE" "$ROOT/backups/pre-restore-$(date +%Y%m%d-%H%M%S).tar.gz"
+    echo "État courant sauvegardé dans backups/ (pre-restore-*)"
+  fi
+fi
+
+tar -xzf "$WORK/source.tar.gz" -C "$WORK"
 
 # Métadonnées : contrôle minimal avant d'écraser l'installation
 if [ -f "$WORK/backup.json" ]; then
