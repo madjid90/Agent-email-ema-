@@ -2,6 +2,34 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [1.0.0] — Phase 8 — Production ready (EMA V1) — 2026-09-16
+
+Périmètre fonctionnel V1 gelé : aucune nouvelle fonctionnalité métier, hors l'import de signature/tampon depuis l'interface (finition attendue de la phase 5).
+
+### Corrigé
+- **Bloquant** : le worker PM2 et les scripts (`db:migrate`, `doctor`) ne chargeaient jamais `.env` — seul Next.js le fait. En production, le worker aurait démarré sans clé Anthropic, sans `APP_SECRET` (donc incapable de déchiffrer les tokens Outlook) et sans token WhatsApp. Chargement ajouté dans `src/lib/dotenv.ts`, appelé par `getEnv()`, sans écraser les variables déjà définies.
+- Les erreurs techniques (SQLite, système de fichiers, exceptions JavaScript) remontaient jusqu'à l'interface ; elles sont remplacées par un message lisible, le détail restant dans les journaux.
+- `APP_URL` en `http://` en production était accepté : le démarrage est désormais refusé (message explicite, `.env.example` commenté).
+- La sauvegarde dépendait du binaire `sqlite3` et retombait sinon sur une copie non cohérente ; elle utilise l'API `backup` de better-sqlite3, vérifie l'intégrité et échoue proprement.
+
+### Ajouté
+- Validation de la configuration au démarrage (`checkEnv`, `assertEnvUsable`) : variable obligatoire manquante = démarrage refusé, message nommant la variable ; avertissements pour les intégrations optionnelles.
+- En-têtes de sécurité : CSP (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`), HSTS en production, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
+- Limitation des tentatives de connexion (8 par 10 minutes, blocage 15 minutes, en mémoire) ; connexions et échecs journalisés dans `history`.
+- Droits resserrés automatiquement : `private/` et `data/` en 700, `.env` et base en 600 ; inspection des droits dans le diagnostic.
+- Import et suppression de la signature et du tampon depuis Sociétés (`POST`/`DELETE /api/companies/[id]/assets`) : PNG vérifié (taille, magic bytes, IHDR, dimensions), nom généré par le serveur, stockage `private/`, jamais `public/`.
+- Observabilité : `src/lib/diagnostics.ts`, `/api/health` (public minimal, détaillé authentifié, 503 si FAIL), page Paramètres → Diagnostic (contrôles, stockage, alerte disque) et Consommation Claude (par jour, par opération, coût estimé via `settings.costs`).
+- `npm run doctor` : 14 contrôles PASS/WARN/FAIL (Node, `.env`, configuration, intégrité SQLite et migrations, worker, disque, droits, intégrations, sociétés, coûts), sans afficher aucun secret.
+- Sauvegarde : métadonnées `backup.json` (version, date, hôte, compteurs), rétention configurable (7 par défaut), archives en 600, `.env` exclu ; restauration avec contrôle d'intégrité et migrations automatiques.
+- Journaux : masquage des adresses email et des numéros, clés sensibles élargies (cookie, session, credential, chemins d'assets).
+- Documentation : `docs/client-onboarding.md`, `docs/pilot-checklist.md`, `docs/privacy.md` (flux de données, export, suppression), `docs/e2e-report.md` (matrice PASS / NOT TESTED), `docs/deployment.md` complété (droits, diagnostic, supervision, rotation des journaux, rétention, vérification d'installation neuve).
+- `ROADMAP.md` : section V2 des fonctionnalités reportées.
+- 18 nouveaux tests (242 au total) : validation d'environnement, chargement `.env`, limitation de connexion, session et cookie falsifié, masquage des journaux, messages d'erreur, import d'asset, traversée de chemin, droits, diagnostic, coûts, en-têtes, sauvegarde.
+
+### Vérifié
+- Installation neuve complète dans un dossier vierge : `npm ci`, `.env`, migrations, `doctor`, `build`, démarrage, authentification, limitation de connexion, import de signature, traversée de chemin, sauvegarde et restauration réelles.
+- Aucun secret dans l'historique git ; seuls `.env.example` et `private/.gitkeep` y figurent.
+
 ## [0.8.0] — Phase 7 — Relances intelligentes et rappels internes — 2026-09-15
 
 ### Ajouté

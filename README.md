@@ -48,6 +48,10 @@ Au premier démarrage, `config/*.json` est créé à partir de `config/*.example
 - [docs/signatures.md](docs/signatures.md) — devis, bon pour accord, signature graphique et tampon
 - [docs/whatsapp-assistant.md](docs/whatsapp-assistant.md) — piloter EMA depuis WhatsApp
 - [docs/followups.md](docs/followups.md) — relances intelligentes et rappels internes
+- [docs/client-onboarding.md](docs/client-onboarding.md) — mise en service d'un nouveau client
+- [docs/pilot-checklist.md](docs/pilot-checklist.md) — checklist pilote 30 jours
+- [docs/privacy.md](docs/privacy.md) — données, confidentialité, export et suppression
+- [docs/e2e-report.md](docs/e2e-report.md) — matrice de tests de bout en bout
 
 ## Licence
 

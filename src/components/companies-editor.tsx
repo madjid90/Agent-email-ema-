@@ -37,14 +37,28 @@ export function CompaniesEditor({ initial }: { initial: CompaniesFile }) {
     fd.set("kind", kind);
     fd.set("file", file);
     const res = await fetch(`/api/companies/${companyId}/assets`, { method: "POST", body: fd });
-    const json = (await res.json()) as { ok: boolean; data?: { path: string }; error?: { message: string } };
+    const json = (await res.json()) as { ok: boolean; data?: { path: string; width: number; height: number; size: number }; error?: { message: string } };
     setSaving(false);
     if (!json.ok) {
-      setMsg({ tone: "danger", text: json.error?.message ?? "Erreur d'upload" });
+      setMsg({ tone: "danger", text: json.error?.message ?? "Import impossible" });
       return;
     }
     setCompanies(companies.map((c) => (c.id === companyId ? { ...c, [kind === "signature" ? "signaturePath" : "stampPath"]: json.data?.path ?? null } : c)));
-    setMsg({ tone: "ok", text: `${kind === "signature" ? "Signature" : "Tampon"} enregistré.` });
+    setMsg({ tone: "ok", text: `${kind === "signature" ? "Signature" : "Tampon"} importé (${json.data?.width}×${json.data?.height}, ${Math.round((json.data?.size ?? 0) / 1024)} Ko).` });
+  }
+
+  async function removeAsset(companyId: string, kind: "signature" | "stamp") {
+    setSaving(true);
+    setMsg(null);
+    const res = await fetch(`/api/companies/${companyId}/assets?kind=${kind}`, { method: "DELETE" });
+    const json = (await res.json()) as { ok: boolean; error?: { message: string } };
+    setSaving(false);
+    if (!json.ok) {
+      setMsg({ tone: "danger", text: json.error?.message ?? "Suppression impossible" });
+      return;
+    }
+    setCompanies(companies.map((c) => (c.id === companyId ? { ...c, [kind === "signature" ? "signaturePath" : "stampPath"]: null } : c)));
+    setMsg({ tone: "ok", text: `${kind === "signature" ? "Signature" : "Tampon"} retiré.` });
   }
 
   async function submit(e: FormEvent) {
@@ -72,10 +86,12 @@ export function CompaniesEditor({ initial }: { initial: CompaniesFile }) {
                   <td>
                     <span className={`badge ${c.signaturePath ? "ok" : "warn"}`}>{c.signaturePath ? "OK" : "Manquante"}</span>
                     <input type="file" accept="image/png" disabled={saving} style={{ marginTop: "0.35rem" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(c.id, "signature", f); }} />
+                    {c.signaturePath ? <button className="btn small" disabled={saving} onClick={() => void removeAsset(c.id, "signature")}>Retirer</button> : null}
                   </td>
                   <td>
                     <span className={`badge ${c.stampPath ? "ok" : "warn"}`}>{c.stampPath ? "OK" : "Manquant"}</span>
                     <input type="file" accept="image/png" disabled={saving} style={{ marginTop: "0.35rem" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(c.id, "stamp", f); }} />
+                    {c.stampPath ? <button className="btn small" disabled={saving} onClick={() => void removeAsset(c.id, "stamp")}>Retirer</button> : null}
                   </td>
                   <td className="row">
                     <button className="btn small" disabled={saving} onClick={() => setEditing({ ...c })}>Modifier</button>

@@ -21,7 +21,15 @@ LAST="$(ls -t "$ROOT/backups"/ema-backup-*.tar.gz 2>/dev/null | head -1 || true)
 [ -n "$LAST" ] && mv "$LAST" "${LAST/ema-backup/pre-restore}" || true
 
 WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 tar -xzf "$ARCHIVE" -C "$WORK"
+
+# Métadonnées : contrôle minimal avant d'écraser l'installation
+if [ -f "$WORK/backup.json" ]; then
+  echo "Sauvegarde : $(node -p "const m=require('$WORK/backup.json'); \`version \${m.version}, créée le \${m.created_at}, base \${m.database}\`" 2>/dev/null || echo 'métadonnées illisibles')"
+else
+  echo "Attention : archive sans métadonnées (sauvegarde antérieure à la version 0.8.0)."
+fi
 
 mkdir -p "$(dirname "$DB_PATH")" "$PRIV" "$CFG"
 if [ -f "$WORK/data/ema.db" ]; then
@@ -40,3 +48,12 @@ for f in settings rules contacts companies; do
 done
 rm -rf "$WORK"
 echo "Restauration terminée depuis $ARCHIVE. Relancer EMA (pm2 start all)."
+
+# Intégrité après restauration (better-sqlite3, sans dépendre du binaire sqlite3)
+if [ -f "$DB_PATH" ]; then
+  INTEGRITY="$(node -e "const D=require('$ROOT/node_modules/better-sqlite3');const db=new D(process.argv[1],{readonly:true});console.log(db.prepare('PRAGMA integrity_check').get().integrity_check);db.close()" "$DB_PATH" 2>/dev/null || echo "inconnue")"
+  echo "Intégrité SQLite après restauration : $INTEGRITY"
+  [ "$INTEGRITY" = "ok" ] || exit 1
+fi
+npm run db:migrate --silent >/dev/null 2>&1 && echo "Migrations appliquées." || echo "Appliquer les migrations manuellement : npm run db:migrate"
+echo "Restauration terminée. Redémarrer EMA : pm2 restart all"

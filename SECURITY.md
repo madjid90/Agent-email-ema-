@@ -81,6 +81,17 @@
 - `scripts/backup.sh` : `data/ema.db` (via `sqlite3 .backup` si disponible, sinon copie), `private/documents`, `private/signed-documents`, `private/signatures`, `private/stamps`, `config/`.
 - Les sauvegardes contiennent des données sensibles : à chiffrer/transférer par le client selon sa politique.
 
+## 9 bis. Exploitation (phase 8)
+
+- **Démarrage refusé** si la configuration est incomplète en production (secret, mot de passe, `APP_URL` en HTTPS, WhatsApp partiellement configuré). Le message nomme la variable ; aucun démarrage partiellement sécurisé.
+- **Droits** : `private/` et `data/` en `700`, `.env` et base en `600`, resserrés à chaque démarrage et vérifiés par `npm run doctor`. Aucun de ces dossiers n'est servi par Nginx.
+- **En-têtes** : CSP (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`), HSTS en production, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
+- **Connexion** : 8 tentatives par 10 minutes puis blocage 15 minutes (compteur en mémoire, aucune infrastructure externe) ; chaque échec et chaque connexion sont journalisés dans `history`.
+- **Import de signature / tampon** : PNG uniquement, vérifié (taille, magic bytes, IHDR, dimensions), nom généré par le serveur, écrit dans `private/` en `600`, jamais dans `public/`.
+- **Journaux** : tokens, mots de passe, cookies et chemins d'assets masqués ; adresses email et numéros masqués ; contenu des documents jamais journalisé. Rotation PM2 obligatoire.
+- **Erreurs** : les messages techniques (SQLite, système de fichiers, exceptions) ne sont jamais affichés ; l'utilisateur voit un message lisible, le détail reste dans les journaux.
+- **Sauvegarde** : copie cohérente vérifiée (`integrity_check`), métadonnées, rétention, `.env` jamais inclus, archives en `600` à copier chiffrées hors du VPS.
+
 ## 10. Checklist avant mise en production
 
 - [ ] `.env` complet, `APP_SECRET` ≥ 32 caractères aléatoires, `APP_PASSWORD` fort
@@ -88,4 +99,10 @@
 - [ ] Webhook WhatsApp vérifié (`WHATSAPP_APP_SECRET`)
 - [ ] `config/` sans secret
 - [ ] `npm audit` sans vulnérabilité critique en runtime
-- [ ] Sauvegarde testée (`backup.sh` + `restore.sh`)
+- [ ] Sauvegarde testée (`backup.sh` + `restore.sh`), rétention et copie chiffrée hors VPS
+- [ ] `npm run doctor` sans FAIL
+- [ ] `/api/health` répond et ne contient aucun secret
+- [ ] En-têtes de sécurité présents (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy)
+- [ ] Droits vérifiés : `private/` et `data/` en 700, `.env` et base en 600
+- [ ] Rotation des journaux activée (`pm2 install pm2-logrotate`)
+- [ ] Signature et tampon de TEST tant que le rendu du PDF signé n'est pas validé par le client

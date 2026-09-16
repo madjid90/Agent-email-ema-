@@ -108,9 +108,30 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Worker sous verrou, reprise après interruption, `docs/followups.md`, 34 tests
 - ⏳ Reporté : jours fériés, relances récurrentes automatiques après envoi
 
-## PHASE 8 — VPS ⏳
+## PHASE 8 — Production ready ✅
 
-- Procédure de déploiement validée sur Ubuntu (PM2, Nginx, SSL)
-- Sauvegarde / restauration testées
-- Procédure de mise à jour
-- Durcissement (rate limiting, rotation des logs)
+- ✅ Validation de la configuration au démarrage : une variable obligatoire manquante empêche le démarrage (message nommant la variable) ; `.env` désormais chargé par le worker et les scripts (bug bloquant corrigé)
+- ✅ Sécurité HTTP : CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy ; limitation des tentatives de connexion (8 par 10 min, blocage 15 min) ; journal d'authentification
+- ✅ Droits des fichiers resserrés automatiquement (`private/` et `data/` en 700, `.env` et base en 600) et vérifiés par le diagnostic
+- ✅ Import de signature et de tampon depuis l'interface (PNG vérifié, nom généré par le serveur, stockage `private/`, suppression possible)
+- ✅ Observabilité : `/api/health` (public minimal, détaillé authentifié, 503 si FAIL), page Paramètres → Diagnostic, alerte disque, consommation Claude par jour et coût estimé
+- ✅ `npm run doctor` : 14 contrôles PASS/WARN/FAIL sans afficher de secret
+- ✅ Sauvegarde cohérente (better-sqlite3, `integrity_check`), métadonnées `backup.json`, rétention 7, restauration testée en conditions réelles
+- ✅ Journaux : tokens, mots de passe et chemins d'assets masqués ; adresses email et numéros masqués ; erreurs techniques remplacées par un message lisible
+- ✅ Documentation : déploiement complet, `client-onboarding.md`, `pilot-checklist.md`, `privacy.md`, `e2e-report.md`
+- ✅ Installation neuve validée (clone, `npm ci`, migrations, doctor, build, démarrage, sécurité, import, sauvegarde/restauration) ; 242 tests
+- ⏳ Reporté : tests E2E avec credentials réels (Microsoft, Anthropic, Meta) et VPS — à cocher à la mise en service (`docs/e2e-report.md`)
+
+## V2 — fonctionnalités reportées (hors périmètre V1)
+
+Aucune de ces fonctionnalités n'est nécessaire au premier pilote. Elles sont listées ici pour éviter qu'elles ne s'invitent dans la V1.
+
+- **Documents** : OCR des PDF scannés, réception de pièces jointes par WhatsApp, upload de documents depuis l'interface.
+- **WhatsApp** : messages vocaux, notifications spontanées au-delà des relances, plusieurs numéros autorisés.
+- **Relances** : jours fériés, relances récurrentes automatiques, règles de relance par catégorie.
+- **Signature** : signature électronique qualifiée (eIDAS), signature de contrats, positionnement assisté.
+- **Recherche** : index vectoriel / RAG sur l'historique.
+- **Agenda** : lecture et création d'événements.
+- **Exploitation** : interface d'administration multi-instances, supervision centralisée, mises à jour automatiques.
+- **Sécurité** : second facteur, plusieurs utilisateurs, journal d'audit exportable.
+

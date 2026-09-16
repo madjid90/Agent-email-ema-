@@ -43,5 +43,10 @@
     "businessDaysOnly": false,
     "requireApproval": true,
     "autoReplyPostponeDays": 1
+  },
+  "costs": {
+    "inputPerMillion": 5,
+    "outputPerMillion": 25,
+    "currency": "USD"
   }
 }

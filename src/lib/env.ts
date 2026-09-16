@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { EmaError } from "./errors";
+import { loadDotEnv } from "./dotenv";
 
 /**
  * Validation de l'environnement. Les valeurs ne sont jamais logguées.
@@ -57,6 +59,8 @@ let cached: Env | null = null;
 
 export function getEnv(): Env {
   if (cached) return cached;
+  // Worker, migrations, doctor : Next.js ne charge pas .env pour eux.
+  loadDotEnv();
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
@@ -69,6 +73,53 @@ export function getEnv(): Env {
 /** Réinitialise le cache (tests uniquement). */
 export function resetEnvCache(): void {
   cached = null;
+}
+
+export interface EnvIssue {
+  variable: string;
+  message: string;
+  level: "error" | "warning";
+}
+
+/**
+ * Contrôle de configuration au démarrage (phase 8). En production, une variable
+ * obligatoire manquante empêche le démarrage : EMA ne tourne jamais dans un état
+ * partiellement sécurisé. Les variables optionnelles remontent en avertissement.
+ */
+export function checkEnv(env: Env = getEnv()): EnvIssue[] {
+  const issues: EnvIssue[] = [];
+  const production = env.NODE_ENV === "production";
+  const err = (variable: string, message: string) => issues.push({ variable, message, level: production ? "error" : "warning" });
+  const warn = (variable: string, message: string) => issues.push({ variable, message, level: "warning" });
+
+  if (!env.APP_SECRET) err("APP_SECRET", "Clé de chiffrement et de signature absente (cookies de session, tokens OAuth)");
+  else if (env.APP_SECRET.length < 32) err("APP_SECRET", "Clé trop courte : 32 caractères minimum");
+  if (!env.APP_PASSWORD) err("APP_PASSWORD", "Mot de passe de l'interface absent : l'accès serait ouvert");
+  else if (env.APP_PASSWORD.length < 12) warn("APP_PASSWORD", "Mot de passe court : 12 caractères minimum recommandés");
+  if (production && !env.APP_URL.startsWith("https://")) err("APP_URL", "HTTPS obligatoire en production");
+
+  const whatsappPartial = Boolean(env.WHATSAPP_ACCESS_TOKEN || env.WHATSAPP_PHONE_NUMBER_ID || env.WHATSAPP_VERIFY_TOKEN);
+  if (whatsappPartial) {
+    if (!env.WHATSAPP_ACCESS_TOKEN) err("WHATSAPP_ACCESS_TOKEN", "WhatsApp partiellement configuré");
+    if (!env.WHATSAPP_PHONE_NUMBER_ID) err("WHATSAPP_PHONE_NUMBER_ID", "WhatsApp partiellement configuré");
+    if (!env.WHATSAPP_VERIFY_TOKEN) err("WHATSAPP_VERIFY_TOKEN", "Jeton de vérification du webhook absent");
+    if (!env.WHATSAPP_APP_SECRET) err("WHATSAPP_APP_SECRET", "Signature des webhooks non vérifiable : webhooks refusés en production");
+    if (!getApproverPhone()) err("WHATSAPP_APPROVER_PHONE", "Numéro autorisé absent : aucune validation possible");
+  } else {
+    warn("WHATSAPP_ACCESS_TOKEN", "WhatsApp non configuré : les validations se font uniquement dans l'interface");
+  }
+  if (!env.ANTHROPIC_API_KEY) warn("ANTHROPIC_API_KEY", "Analyse Claude indisponible tant que la clé n'est pas renseignée");
+  if (!env.MICROSOFT_CLIENT_ID || !env.MICROSOFT_CLIENT_SECRET) warn("MICROSOFT_CLIENT_ID", "Connexion Outlook impossible tant que l'App Registration n'est pas renseignée");
+  else if (!env.MICROSOFT_REDIRECT_URI) warn("MICROSOFT_REDIRECT_URI", "URL de redirection OAuth absente");
+  return issues;
+}
+
+/** Lève si la configuration interdit un démarrage sûr (production). */
+export function assertEnvUsable(env: Env = getEnv()): void {
+  const blocking = checkEnv(env).filter((i) => i.level === "error");
+  if (blocking.length === 0) return;
+  const detail = blocking.map((i) => `${i.variable} : ${i.message}`).join(" | ");
+  throw new EmaError("CONFIG", `Configuration incomplète, EMA ne peut pas démarrer — ${detail}. Corriger .env (voir .env.example et docs/deployment.md), puis redémarrer.`);
 }
 
 /** Numéro autorisé à valider, normalisé en chiffres (ex. 33612345678), ou null. */

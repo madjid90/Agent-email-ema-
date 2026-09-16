@@ -46,6 +46,38 @@ export function listLlmRuns(opts: { emailId?: string; limit?: number } = {}, db:
   return db.prepare("SELECT * FROM llm_runs ORDER BY created_at DESC LIMIT ?").all(opts.limit ?? 100) as LlmRunRow[];
 }
 
+export interface DailyUsage {
+  day: string;
+  runs: number;
+  errors: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Consommation Claude par jour (diagnostic, mesure du coût des pilotes). */
+export function llmUsageByDay(days = 14, db: Db = getDb()): DailyUsage[] {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS runs,
+              SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
+              COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens
+       FROM llm_runs WHERE created_at >= ? GROUP BY day ORDER BY day DESC`,
+    )
+    .all(since) as { day: string; runs: number; errors: number | null; input_tokens: number; output_tokens: number }[];
+  return rows.map((r) => ({ day: r.day, runs: r.runs, errors: r.errors ?? 0, inputTokens: r.input_tokens, outputTokens: r.output_tokens }));
+}
+
+/** Consommation par opération (analyse email, document, chat, relance). */
+export function llmUsageByOperation(since: string, db: Db = getDb()): { operation: string; runs: number; inputTokens: number; outputTokens: number }[] {
+  return db
+    .prepare(
+      `SELECT operation, COUNT(*) AS runs, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens
+       FROM llm_runs WHERE created_at >= ? GROUP BY operation ORDER BY runs DESC`,
+    )
+    .all(since) as { operation: string; runs: number; inputTokens: number; outputTokens: number }[];
+}
+
 export function llmUsageSince(since: string, db: Db = getDb()): { runs: number; errors: number; inputTokens: number; outputTokens: number } {
   const row = db
     .prepare(

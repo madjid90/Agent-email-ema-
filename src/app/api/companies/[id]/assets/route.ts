@@ -1,41 +1,66 @@
-import fs from "node:fs";
+import { z } from "zod";
 import { route, ok } from "@/lib/api";
-import { EmaError } from "@/lib/errors";
 import { readConfig, writeConfig } from "@/lib/config";
-import { privatePath, ensurePrivateDirs, sanitizeFilename } from "@/lib/paths";
+import { EmaError } from "@/lib/errors";
 import { logHistory } from "@/database/repositories/history";
+import { MAX_ASSET_BYTES, removeAsset, storeAsset } from "@/documents/assets";
 
-const MAX_BYTES = 2 * 1024 * 1024;
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const kindSchema = z.enum(["signature", "stamp"]);
 
 /**
- * Upload de la signature ou du tampon d'une société (PNG ≤ 2 Mo) dans
- * private/signatures ou private/stamps. Le fichier n'est jamais servi
- * publiquement et n'est jamais transmis à Claude.
+ * Import d'une signature ou d'un tampon (PNG) depuis l'interface authentifiée.
+ * Le fichier est vérifié (taille, magic bytes, IHDR, dimensions), renommé par le
+ * serveur et écrit dans `private/` — jamais dans `public/`. Le chemin est ensuite
+ * enregistré dans `config/companies.json`.
  */
 export const POST = route(async (req, ctx: { params: Promise<{ id: string }> }) => {
   const { id } = await ctx.params;
-  const form = await req.formData();
-  const kind = form.get("kind");
+  const form = await req.formData().catch(() => {
+    throw new EmaError("VALIDATION", "Envoi invalide : formulaire multipart attendu");
+  });
+  const kind = kindSchema.parse(form.get("kind"));
   const file = form.get("file");
-  if (kind !== "signature" && kind !== "stamp") throw new EmaError("VALIDATION", "kind doit être signature ou stamp");
-  if (!(file instanceof File)) throw new EmaError("VALIDATION", "Fichier manquant");
-  if (file.size > MAX_BYTES) throw new EmaError("VALIDATION", "Fichier trop volumineux (2 Mo max)");
-  const bytes = Buffer.from(await file.arrayBuffer());
-  if (bytes.subarray(0, 8).compare(PNG_MAGIC) !== 0) throw new EmaError("VALIDATION", "Seul le format PNG est accepté");
+  if (!(file instanceof File)) throw new EmaError("VALIDATION", "Aucun fichier reçu");
+  if (file.size > MAX_ASSET_BYTES) throw new EmaError("VALIDATION", `Fichier trop volumineux (max ${Math.round(MAX_ASSET_BYTES / 1024 / 1024)} Mo)`);
 
-  const companies = readConfig("companies");
-  const company = companies.companies.find((c) => c.id === id);
+  const config = readConfig("companies");
+  const company = config.companies.find((c) => c.id === id);
   if (!company) throw new EmaError("NOT_FOUND", `Société ${id} introuvable`);
 
-  ensurePrivateDirs();
-  const dir = kind === "signature" ? "signatures" : "stamps";
-  const filename = sanitizeFilename(`${company.id}-${kind}.png`);
-  fs.writeFileSync(privatePath(dir, filename), bytes);
-  const relative = `${dir}/${filename}`;
-  if (kind === "signature") company.signaturePath = relative;
-  else company.stampPath = relative;
-  writeConfig("companies", companies);
-  logHistory({ eventType: `company.${kind}_uploaded`, message: `${kind === "signature" ? "Signature" : "Tampon"} mis à jour pour ${company.name}`, actor: "user" });
-  return ok({ company_id: company.id, kind, path: relative });
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const stored = storeAsset(company.id, kind, bytes);
+  const previous = kind === "signature" ? company.signaturePath : company.stampPath;
+
+  const updated = {
+    ...config,
+    companies: config.companies.map((c) => (c.id === id ? { ...c, ...(kind === "signature" ? { signaturePath: stored.relativePath } : { stampPath: stored.relativePath }) } : c)),
+  };
+  writeConfig("companies", updated);
+  if (previous && previous !== stored.relativePath) removeAsset(previous);
+
+  logHistory({
+    eventType: kind === "signature" ? "company.signature_uploaded" : "company.stamp_uploaded",
+    message: `${kind === "signature" ? "Signature" : "Tampon"} importé pour ${company.name} (${stored.width}×${stored.height}, ${Math.round(stored.bytes / 1024)} Ko)`,
+    actor: "user",
+  });
+  // Le chemin relatif (dans private/) est renvoyé à l'interface authentifiée pour
+  // qu'elle reste synchronisée ; il n'est jamais transmis au modèle.
+  return ok({ company_id: company.id, kind, path: stored.relativePath, width: stored.width, height: stored.height, size: stored.bytes, available: true });
+});
+
+/** Supprime la signature ou le tampon configuré. */
+export const DELETE = route(async (req, ctx: { params: Promise<{ id: string }> }) => {
+  const { id } = await ctx.params;
+  const kind = kindSchema.parse(new URL(req.url).searchParams.get("kind"));
+  const config = readConfig("companies");
+  const company = config.companies.find((c) => c.id === id);
+  if (!company) throw new EmaError("NOT_FOUND", `Société ${id} introuvable`);
+  const previous = kind === "signature" ? company.signaturePath : company.stampPath;
+  writeConfig("companies", {
+    ...config,
+    companies: config.companies.map((c) => (c.id === id ? { ...c, ...(kind === "signature" ? { signaturePath: null } : { stampPath: null }) } : c)),
+  });
+  removeAsset(previous);
+  logHistory({ eventType: "company.asset_removed", message: `${kind === "signature" ? "Signature" : "Tampon"} retiré pour ${company.name}`, actor: "user" });
+  return ok({ company_id: company.id, kind, available: false });
 });

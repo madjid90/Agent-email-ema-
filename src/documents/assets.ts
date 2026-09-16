@@ -53,6 +53,40 @@ export function loadAsset(company: Company, kind: AssetKind): LoadedAsset {
   return { bytes, width, height, label: assetLabel(company, kind) };
 }
 
+/**
+ * Vérifie des octets fournis par l'utilisateur (import depuis l'interface) puis
+ * les écrit dans `private/signatures` ou `private/stamps` sous un nom généré par
+ * le serveur. Mêmes contrôles qu'au chargement : taille, magic bytes PNG, IHDR,
+ * dimensions. Aucun fichier n'est jamais écrit hors de `private/`.
+ */
+export function storeAsset(companyId: string, kind: AssetKind, bytes: Buffer, now: Date = new Date()): { relativePath: string; width: number; height: number; bytes: number } {
+  if (!/^[\w.\-]{1,64}$/.test(companyId)) throw new EmaError("VALIDATION", "Identifiant de société invalide");
+  if (bytes.length === 0) throw new EmaError("VALIDATION", "Fichier vide");
+  if (bytes.length > MAX_ASSET_BYTES) throw new EmaError("VALIDATION", `Fichier trop volumineux (max ${Math.round(MAX_ASSET_BYTES / 1024 / 1024)} Mo)`);
+  if (bytes.subarray(0, 8).compare(PNG_MAGIC) !== 0) throw new EmaError("VALIDATION", "Seul le format PNG est accepté");
+  const { width, height } = pngDimensions(bytes);
+  if (width < MIN_DIM || height < MIN_DIM || width > MAX_DIM || height > MAX_DIM) throw new EmaError("VALIDATION", `Dimensions inattendues (${width}×${height}) : entre ${MIN_DIM} et ${MAX_DIM} pixels`);
+
+  const dir = kind === "signature" ? "signatures" : "stamps";
+  // Nom entièrement généré côté serveur : le nom d'origine n'est jamais réutilisé.
+  const stamp = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  const name = `${companyId}-${kind}-${stamp}.png`;
+  const target = safeJoin(privateRoot(), dir, name);
+  fs.mkdirSync(safeJoin(privateRoot(), dir), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(target, bytes, { mode: 0o600 });
+  return { relativePath: `${dir}/${name}`, width, height, bytes: bytes.length };
+}
+
+/** Supprime un asset devenu inutile (remplacement). Silencieux si absent. */
+export function removeAsset(relativePath: string | null | undefined): void {
+  if (!relativePath || !/^(signatures|stamps)\/[\w.\-]+\.png$/i.test(relativePath)) return;
+  try {
+    fs.rmSync(safeJoin(privateRoot(), relativePath), { force: true });
+  } catch {
+    /* fichier déjà absent */
+  }
+}
+
 /** Dimensions lues dans le chunk IHDR (les 8 octets après la signature + longueur + type). */
 export function pngDimensions(bytes: Buffer): { width: number; height: number } {
   if (bytes.length < 24 || bytes.subarray(12, 16).toString("ascii") !== "IHDR") throw new EmaError("VALIDATION", "PNG corrompu (IHDR absent)");

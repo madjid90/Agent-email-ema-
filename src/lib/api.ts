@@ -13,8 +13,12 @@ export function ok<T>(data: T, init?: ResponseInit): NextResponse {
 
 export function fail(err: unknown): NextResponse {
   const e = err instanceof EmaError ? err : toEmaError(err);
-  if (e.status >= 500 && e.code !== "NOT_IMPLEMENTED") log.error("api error", { code: e.code, message: e.message });
-  else if (e.status >= 400) log.warn("api rejected", { code: e.code, message: e.message });
+  // Le détail technique va dans les journaux ; l'utilisateur reçoit un message lisible.
+  if (e.status >= 500 && e.code !== "NOT_IMPLEMENTED") {
+    log.error("api error", { code: e.code, message: e.message, cause: err instanceof Error && err.cause instanceof Error ? err.cause.message : err instanceof Error ? err.message : undefined });
+  } else if (e.status >= 400) {
+    log.warn("api rejected", { code: e.code, message: e.message });
+  }
   return NextResponse.json({ ok: false, error: e.toJSON() }, { status: e.status });
 }
 

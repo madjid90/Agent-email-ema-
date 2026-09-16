@@ -42,7 +42,7 @@ Outlook → Microsoft Graph → EMA (worker) → Contexte (thread + règles + so
       → WhatsApp (validation) → Exécution → Outlook / Documents → Historique
 ```
 
-Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`. Devis / signature : `docs/signatures.md`. Assistant WhatsApp : `docs/whatsapp-assistant.md`. Relances : `docs/followups.md`.
+Détails : `ARCHITECTURE.md`. Règles métier : `BUSINESS_RULES.md`. Tools : `TOOLS.md`. Sécurité : `SECURITY.md`. Outlook : `docs/outlook.md`. Analyse Claude : `docs/analysis.md`. WhatsApp : `docs/whatsapp.md`. Documents / factures : `docs/documents.md`. Devis / signature : `docs/signatures.md`. Assistant WhatsApp : `docs/whatsapp-assistant.md`. Relances : `docs/followups.md`. Production : `docs/deployment.md`, `docs/client-onboarding.md`, `docs/privacy.md`.
 
 ## 4. Structure du projet
 

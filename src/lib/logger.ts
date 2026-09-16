@@ -3,7 +3,16 @@ import { getEnv } from "./env";
 type Level = "debug" | "info" | "warn" | "error";
 const LEVELS: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
-const REDACT_KEYS = /token|secret|password|api_key|apikey|authorization|refresh|access/i;
+const REDACT_KEYS = /token|secret|password|passphrase|api_key|apikey|authorization|refresh|access|cookie|session|credential|private_key|signature_path|stamp_path/i;
+
+/** Adresses email masquées dans les journaux : `j***@domaine.fr`. */
+const EMAIL_RE = /\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g;
+/** Numéros de téléphone (8 chiffres ou plus) masqués. */
+const PHONE_RE = /\b(\+?\d{2})\d{4,}(\d{2})\b/g;
+
+export function maskPersonalData(text: string): string {
+  return text.replace(EMAIL_RE, (_m, first: string, domain: string) => `${first}***@${domain}`).replace(PHONE_RE, (_m, head: string, tail: string) => `${head}…${tail}`);
+}
 
 /** Masque récursivement les champs sensibles avant écriture dans les logs. */
 export function redact(value: unknown, depth = 0): unknown {
@@ -16,6 +25,7 @@ export function redact(value: unknown, depth = 0): unknown {
     }
     return out;
   }
+  if (typeof value === "string") return maskPersonalData(value);
   return value;
 }
 
@@ -26,7 +36,7 @@ function write(level: Level, scope: string, msg: string, data?: Record<string, u
     ts: new Date().toISOString(),
     level,
     scope,
-    msg,
+    msg: maskPersonalData(msg),
     ...(data ? { data: redact(data) } : {}),
   };
   const text = JSON.stringify(line);

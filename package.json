@@ -1,6 +1,6 @@
 {
   "name": "ema",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "private": true,
   "description": "EMA - Agent administratif IA pour une boîte Outlook professionnelle (instance privée, déployée sur VPS)",
   "scripts": {
@@ -14,7 +14,10 @@
     "db:migrate": "tsx src/database/cli.ts migrate",
     "db:status": "tsx src/database/cli.ts status",
     "worker": "tsx src/worker/index.ts",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "doctor": "tsx scripts/doctor.ts",
+    "backup": "bash scripts/backup.sh",
+    "restore": "bash scripts/restore.sh"
   },
   "engines": {
     "node": ">=20.11"

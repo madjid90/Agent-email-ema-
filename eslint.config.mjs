@@ -13,6 +13,11 @@ const eslintConfig = [
     ignores: ["node_modules/**", ".next/**", "out/**", "data/**", "private/**", "next-env.d.ts"],
   },
   {
+    // Scripts d'exploitation exécutés par Node en CommonJS (sauvegarde) : require() attendu.
+    files: ["scripts/**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/ban-ts-comment": ["error", { "ts-ignore": true, "ts-expect-error": "allow-with-description" }],

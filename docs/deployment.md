@@ -40,9 +40,24 @@ Renseigner :
 - `ANTHROPIC_API_KEY`
 - `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID`, `MICROSOFT_REDIRECT_URI=https://ema.client.fr/api/integrations/microsoft/callback`
 - `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_APPROVER_PHONE`
-- `APP_URL=https://ema.client.fr`
-- `APP_SECRET` : `openssl rand -hex 32`
-- `APP_PASSWORD` : mot de passe d'accès à l'interface
+- `APP_URL=https://ema.client.fr` — **HTTPS obligatoire** : en production, EMA refuse de démarrer avec une URL en `http://`
+- `APP_SECRET` : `openssl rand -hex 32` (32 caractères minimum)
+- `APP_PASSWORD` : mot de passe d'accès à l'interface (12 caractères minimum, généré : `openssl rand -base64 18`)
+
+Variables optionnelles : `WHATSAPP_ASSISTANT_ENABLED` (défaut `true`), `WHATSAPP_FOLLOWUP_TEMPLATE_NAME` / `_LANG` (notifications proactives hors fenêtre de 24 h), `LOG_LEVEL`, `WORKER_POLL_INTERVAL`, `EMAIL_SYNC_LIMIT`, `EMAIL_INITIAL_SYNC_DAYS`, `ATTACHMENT_MAX_MB`, `DATABASE_PATH`, `PRIVATE_STORAGE_PATH`, `CONFIG_PATH`.
+
+Au démarrage, EMA vérifie la configuration : une variable obligatoire manquante (secret, mot de passe, HTTPS, WhatsApp partiellement configuré) empêche le démarrage avec un message nommant la variable. Rien ne tourne dans un état partiellement sécurisé.
+
+### Droits des fichiers
+
+```bash
+chmod 600 ~/ema/.env
+chmod 700 ~/ema/data ~/ema/private ~/ema/config
+find ~/ema/private -type d -exec chmod 700 {} \;
+find ~/ema/private -type f -exec chmod 600 {} \;
+```
+
+EMA resserre ces droits automatiquement à chaque démarrage (dossiers `700`, `.env` et base `600`). `npm run doctor` signale tout chemin lisible au-delà du propriétaire. **Aucun de ces dossiers n'est servi par Nginx** : les documents transitent uniquement par `/api/documents/[id]/file`, après authentification.
 
 Les fichiers `config/*.json` sont créés au premier lancement à partir des `*.example.json` ; ils se modifient ensuite depuis l'interface (`/setup`, Règles, Sociétés) ou en SSH.
 
@@ -59,12 +74,15 @@ Les fichiers `config/*.json` sont créés au premier lancement à partir des `*.
 2. Webhook : URL `https://ema.client.fr/api/integrations/whatsapp/webhook`, verify token = `WHATSAPP_VERIFY_TOKEN`, abonnement au champ `messages`.
 3. `WHATSAPP_APPROVER_PHONE` = numéro de l'utilisateur (chiffres, ex. `33612345678`) : seul numéro autorisé à valider. Vérifier avec « Test notification » dans `/setup`. Détails : `docs/whatsapp.md`.
 
-## 4. Base de données et build
+## 4. Base de données, diagnostic et build
 
 ```bash
 npm run db:migrate
+npm run doctor      # PASS / WARN / FAIL, sans afficher aucun secret
 npm run build
 ```
+
+`npm run doctor` vérifie : Node.js, `.env`, configuration, intégrité SQLite et migrations, battement du worker, espace disque, droits des fichiers, intégrations (Anthropic, Outlook, WhatsApp), sociétés et disponibilité des signatures. Code de sortie 1 si un contrôle est en FAIL.
 
 ## 5. Lancement avec PM2
 
@@ -130,13 +148,23 @@ sudo ufw enable
 
 Ouvrir `https://ema.client.fr/setup` et suivre les 8 étapes (Entreprise, Outlook, Claude, WhatsApp, Règles, Sociétés, Signatures/tampons, Test).
 
-## 9. Logs
+## 9. Supervision et logs
 
-- Application : `pm2 logs`, fichiers dans `~/.pm2/logs/`.
-- Nginx : `/var/log/nginx/access.log`, `/var/log/nginx/error.log`.
-- Niveau de log : `LOG_LEVEL` dans `.env`.
+- Santé : `https://ema.client.fr/api/health` renvoie publiquement `{status, version, time}` ; connecté à l'interface, le même point d'entrée renvoie le diagnostic complet (contrôles, disque, worker, coûts) et le code HTTP 503 si un contrôle est en FAIL. Aucun secret n'est exposé dans les deux cas.
+- Interface : Paramètres → Diagnostic (contrôles, stockage, consommation Claude par jour) ; alerte automatique quand l'espace disque libre passe sous 10 %.
+- Ligne de commande : `npm run doctor`.
+- Application : `pm2 logs`, fichiers dans `~/.pm2/logs/`. Nginx : `/var/log/nginx/`.
+- Niveau de log : `LOG_LEVEL` dans `.env` (`info` en production).
+- Les journaux ne contiennent ni token, ni mot de passe, ni signature, ni contenu de document ; les adresses email et numéros sont masqués (`k***@client.fr`, `33…78`).
 
-Rotation : `pm2 install pm2-logrotate`.
+Rotation (obligatoire, sinon les journaux remplissent le disque) :
+
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 20M
+pm2 set pm2-logrotate:retain 14
+pm2 set pm2-logrotate:compress true
+```
 
 ## 10. Sauvegarde
 
@@ -145,7 +173,11 @@ Rotation : `pm2 install pm2-logrotate`.
 ./scripts/backup.sh /mnt/backups   # destination personnalisée
 ```
 
-Contenu : `data/ema.db` (copie cohérente via `sqlite3 .backup`), `private/documents`, `private/signed-documents`, `private/signatures`, `private/stamps`, `config/`.
+Contenu : `data/ema.db` (copie cohérente via l'API `backup` de better-sqlite3, vérifiée par `PRAGMA integrity_check`), `private/documents`, `private/signed-documents`, `private/signatures`, `private/stamps`, `config/*.json`, plus un fichier `backup.json` (version, date, hôte, compteurs de lignes).
+
+**`.env` n'est jamais sauvegardé** : il contient les secrets et se recrée à l'installation. Conserver les secrets dans le gestionnaire de mots de passe de l'agence.
+
+Rétention : les 7 dernières archives sont conservées (`./scripts/backup.sh /home/ema/backups --keep 14` pour changer). Chaque archive est en droits `600`.
 
 Planifier (cron, tous les jours à 3h) :
 
@@ -153,7 +185,7 @@ Planifier (cron, tous les jours à 3h) :
 0 3 * * * cd /home/ema/ema && ./scripts/backup.sh /home/ema/backups >> /home/ema/backup.log 2>&1
 ```
 
-Les archives contiennent des données sensibles : les copier hors du VPS de façon chiffrée.
+Les archives contiennent des données client : les copier hors du VPS de façon chiffrée (`rsync` vers un stockage chiffré, ou `age`/`gpg` avant transfert). Aucun service cloud n'est requis.
 
 ## 11. Restauration
 
@@ -177,7 +209,20 @@ npm run build
 pm2 restart all
 ```
 
-## 13. Dépannage
+## 13. Installation neuve : vérification finale
+
+À la fin d'une installation, ces huit points doivent être vrais :
+
+1. `npm run doctor` → aucun FAIL.
+2. `npm run check` → typecheck, lint, tests et build verts (sur une machine de développement ; sur le VPS, `npm run build` suffit).
+3. `pm2 status` → `ema-web` et `ema-worker` en ligne.
+4. `curl -s https://ema.client.fr/api/health` → `{"ok":true,...}`.
+5. `https://ema.client.fr/login` répond et refuse un mauvais mot de passe (8 tentatives maximum, puis blocage 15 minutes).
+6. `https://ema.client.fr/setup` redirige vers `/login` sans session.
+7. `curl -I https://ema.client.fr/login` → `Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`.
+8. `./scripts/backup.sh` puis `./scripts/restore.sh` sur une instance de test → intégrité `ok`.
+
+## 14. Dépannage
 
 | Symptôme | Piste |
 |---|---|
@@ -185,3 +230,8 @@ pm2 restart all
 | Pas de message WhatsApp | Vérifier `WHATSAPP_ACCESS_TOKEN` (expiration), le numéro destinataire, `pm2 logs ema-worker` |
 | Erreur `SQLITE_BUSY` | Un seul worker doit tourner : `pm2 status` |
 | Build échoue | `node --version` ≥ 20.11, `npm ci` propre |
+| `Configuration incomplète, EMA ne peut pas démarrer` | La variable nommée dans le message manque dans `.env` (souvent `APP_URL` en `http://`) |
+| `/api/health` en 503 | Un contrôle est en FAIL : ouvrir Paramètres → Diagnostic ou lancer `npm run doctor` |
+| Worker « aucun battement » | `pm2 restart ema-worker`, puis `pm2 logs ema-worker` |
+| Espace disque faible | Purger `backups/`, vérifier la taille de `private/documents` (Paramètres → Diagnostic) |
+| Notifications WhatsApp en attente | Fenêtre de 24 h fermée : configurer `WHATSAPP_FOLLOWUP_TEMPLATE_NAME` (voir `docs/followups.md`) |

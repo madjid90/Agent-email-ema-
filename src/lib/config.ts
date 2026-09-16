@@ -64,6 +64,14 @@ export const settingsSchema = z.object({
       autoReplyPostponeDays: z.number().int().min(1).max(30).default(1),
     })
     .default({ enabled: true, defaultDelayDays: 3, defaultTime: "09:00", maxAttempts: 2, businessDaysOnly: false, requireApproval: true, autoReplyPostponeDays: 1 }),
+  costs: z
+    .object({
+      /** Tarifs Claude utilisés pour l'estimation locale (USD par million de tokens). */
+      inputPerMillion: z.number().min(0).default(5),
+      outputPerMillion: z.number().min(0).default(25),
+      currency: z.string().default("USD"),
+    })
+    .default({ inputPerMillion: 5, outputPerMillion: 25, currency: "USD" }),
   analysis: z
     .object({
       /** ≥ reliable : analyse fiable ; entre review et reliable : avertissement ; < review : validation humaine. */

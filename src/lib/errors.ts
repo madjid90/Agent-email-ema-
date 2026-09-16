@@ -63,9 +63,25 @@ export class NotImplementedError extends EmaError {
   }
 }
 
+/**
+ * Message générique affiché à l'utilisateur pour une erreur technique.
+ * Le détail (SQLITE_CONSTRAINT, ENOENT, stack…) reste dans les logs serveur.
+ */
+export const GENERIC_INTERNAL_MESSAGE = "EMA n'a pas pu traiter cette opération. Le détail technique est dans les journaux du serveur.";
+
+/** Erreurs techniques dont le message ne doit jamais être affiché tel quel. */
+const TECHNICAL_ERROR = /^(SQLITE_|ENOENT|EACCES|EPERM|EEXIST|EPIPE|ECONN|ETIMEDOUT|ERR_|TypeError|ReferenceError|RangeError|SyntaxError|Cannot read|Cannot set|undefined is not|null is not|.*\bat\s+\/)/i;
+
+export function isTechnicalMessage(message: string): boolean {
+  return TECHNICAL_ERROR.test(message.trim());
+}
+
 /** Convertit n'importe quelle erreur en EmaError sans fuite d'information. */
 export function toEmaError(err: unknown): EmaError {
   if (err instanceof EmaError) return err;
-  if (err instanceof Error) return new EmaError("INTERNAL", err.message, { cause: err });
-  return new EmaError("INTERNAL", "Erreur inconnue");
+  if (err instanceof Error) {
+    const message = isTechnicalMessage(err.message) ? GENERIC_INTERNAL_MESSAGE : err.message;
+    return new EmaError("INTERNAL", message, { cause: err });
+  }
+  return new EmaError("INTERNAL", GENERIC_INTERNAL_MESSAGE);
 }
