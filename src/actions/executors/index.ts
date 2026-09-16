@@ -33,6 +33,11 @@ const prepareReply: ActionExecutor<"prepare_reply"> = {
   },
 };
 
+/** Oublie l'enregistrement (tests uniquement), symétrique de `resetToolsForTests`. */
+export function resetDefaultExecutorsForTests(): void {
+  registered = false;
+}
+
 export function registerDefaultExecutors(): void {
   if (registered) return;
   registerExecutor(prepareReply as ActionExecutor);

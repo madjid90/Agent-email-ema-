@@ -117,14 +117,17 @@ describe("Authentification et limitation de débit", () => {
     expect(hitRateLimit("slide", LOGIN_RATE_LIMIT, t0 + LOGIN_RATE_LIMIT.windowMs + 1000).allowed).toBe(true);
   });
 
-  it("ignore X-Forwarded-For tant que le proxy n'est pas déclaré de confiance (phase 8A)", () => {
+  it("n'utilise jamais X-Forwarded-For ; X-Real-IP seulement si le proxy est déclaré de confiance", () => {
     // En-tête falsifiable : sans TRUST_PROXY_HEADER, une clé globale s'applique
     // (EMA est mono-utilisateur) plutôt qu'une limite contournable à volonté.
     const forged = new Request("http://x", { headers: { "x-forwarded-for": "203.0.113.7, 10.0.0.1" } });
     expect(clientKey(forged)).toBe("login:global");
     const { restore } = envWith({ TRUST_PROXY_HEADER: "true" });
-    expect(clientKey(forged)).toBe("login:203.0.113.7");
-    expect(clientKey(new Request("http://x"))).toBe("login:local");
+    // Même en mode proxy de confiance, X-Forwarded-For n'est pas lu.
+    expect(clientKey(forged)).toBe("login:global");
+    // Seul X-Real-IP, fixé par Nginx à $remote_addr, fait foi.
+    expect(clientKey(new Request("http://x", { headers: { "x-real-ip": "203.0.113.7" } }))).toBe("login:203.0.113.7");
+    expect(clientKey(new Request("http://x"))).toBe("login:global");
     restore();
   });
 

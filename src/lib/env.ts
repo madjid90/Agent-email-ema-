@@ -103,7 +103,9 @@ export function checkEnv(env: Env = getEnv()): EnvIssue[] {
   if (!env.APP_SECRET) err("APP_SECRET", "Clé de chiffrement et de signature absente (cookies de session, tokens OAuth)");
   else if (env.APP_SECRET.length < 32) err("APP_SECRET", "Clé trop courte : 32 caractères minimum");
   if (!env.APP_PASSWORD) err("APP_PASSWORD", "Mot de passe de l'interface absent : l'accès serait ouvert");
-  else if (env.APP_PASSWORD.length < 12) warn("APP_PASSWORD", "Mot de passe court : 12 caractères minimum recommandés");
+  // En production, un mot de passe court est bloquant : l'interface donne accès
+  // à toute la boîte mail du client, aux documents et aux validations.
+  else if (env.APP_PASSWORD.length < 12) err("APP_PASSWORD", "Mot de passe trop court : 12 caractères minimum");
   if (production && !env.APP_URL.startsWith("https://")) err("APP_URL", "HTTPS obligatoire en production");
 
   const whatsappPartial = Boolean(env.WHATSAPP_ACCESS_TOKEN || env.WHATSAPP_PHONE_NUMBER_ID || env.WHATSAPP_VERIFY_TOKEN);

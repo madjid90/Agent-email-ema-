@@ -10,7 +10,7 @@ import { reconcileSentMessage, normalizeSubject } from "@/integrations/microsoft
 import { acquireLock, renewLock, releaseLock, currentLock } from "@/database/repositories/locks";
 import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent, listStaleWebhookEvents, getWebhookEvent } from "@/database/repositories/webhook-events";
 import { validateOutboundRecipients, resolveContactId, configuredRecipients } from "@/agent/recipients";
-import { recoverStaleActions, resolveAmbiguousAction, AMBIGUOUS_CODE } from "@/actions/recovery";
+import { recoverStaleActions, resolveAmbiguousAction, reconcileAction, AMBIGUOUS_CODE } from "@/actions/recovery";
 import { approveAndExecute, clearExecutors, proposeAction, registerExecutor } from "@/actions/engine";
 import { createOutlookExecutors, loadOutgoingAttachments } from "@/actions/executors/outlook";
 import { hitRateLimit, resetRateLimit, clearRateLimits, clientKey, LOGIN_RATE_LIMIT } from "@/security/rate-limit";
@@ -34,6 +34,13 @@ const sessionCookie = { value: undefined as string | undefined };
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: (name: string) => (name === "ema_session" && sessionCookie.value ? { name, value: sessionCookie.value } : undefined) }),
 }));
+
+/** Écriture d'une variable d'environnement dans un test (NODE_ENV est typé en lecture seule). */
+const setEnv = (key: string, value: string | undefined): void => {
+  const env = process.env as Record<string, string | undefined>;
+  if (value === undefined) delete env[key];
+  else env[key] = value;
+};
 
 const settings = settingsSchema.parse({ company: { name: "GOMU", userName: "Madjid", email: "moi@gomu.fr" } });
 const contacts: Contact[] = [{ id: "nabila", name: "Nabila", email: "nabila@gomu.fr", role: "Comptabilité", internal: true }];
@@ -358,14 +365,32 @@ describe("Limitation des tentatives de connexion", () => {
     expect(hitRateLimit("login:global", LOGIN_RATE_LIMIT, t0, db).remaining).toBe(LOGIN_RATE_LIMIT.max - 1);
   });
 
-  it("X-Forwarded-For n'est pris en compte que si le proxy est déclaré de confiance", () => {
-    const req = new Request("http://localhost/api/auth/login", { headers: { "x-forwarded-for": "1.2.3.4" } });
-    process.env.TRUST_PROXY_HEADER = "false";
-    resetEnvCache();
-    expect(clientKey(req)).toBe("login:global");
+  it("un X-Forwarded-For fourni par l'attaquant ne permet jamais de contourner la limite", () => {
+    // Configuration Nginx recommandée : X-Real-IP = $remote_addr, X-Forwarded-For
+    // réécrit lui aussi ; le client ne contrôle donc aucun des deux.
+    const attacker = (forged: string) =>
+      new Request("http://localhost/api/auth/login", { headers: { "x-forwarded-for": forged, "x-real-ip": "203.0.113.9" } });
+
     process.env.TRUST_PROXY_HEADER = "true";
     resetEnvCache();
-    expect(clientKey(req)).toBe("login:1.2.3.4");
+    // 5 tentatives avec une adresse falsifiée différente à chaque essai.
+    const t0 = Date.parse("2026-09-16T10:00:00Z");
+    for (let i = 1; i <= LOGIN_RATE_LIMIT.max; i++) {
+      const key = clientKey(attacker(`10.0.0.${i}`));
+      expect(key).toBe("login:203.0.113.9"); // toujours la même clé : l'adresse réelle
+      expect(hitRateLimit(key, LOGIN_RATE_LIMIT, t0 + i * 1000, db).allowed).toBe(true);
+    }
+    // 6e tentative avec une nouvelle adresse falsifiée : toujours bloquée.
+    const blocked = hitRateLimit(clientKey(attacker("10.0.0.99")), LOGIN_RATE_LIMIT, t0 + 6000, db);
+    expect(blocked.allowed).toBe(false);
+
+    // Proxy mal configuré (X-Real-IP absent) : retour à la clé globale, jamais à l'en-tête client.
+    expect(clientKey(new Request("http://localhost/api/auth/login", { headers: { "x-forwarded-for": "1.2.3.4" } }))).toBe("login:global");
+
+    // Sans proxy de confiance : clé globale quoi qu'envoie le client.
+    process.env.TRUST_PROXY_HEADER = "false";
+    resetEnvCache();
+    expect(clientKey(attacker("10.0.0.1"))).toBe("login:global");
     delete process.env.TRUST_PROXY_HEADER;
     resetEnvCache();
   });
@@ -492,7 +517,25 @@ describe("Reprise des actions interrompues", () => {
         return { ok: true, summary: "Réponse envoyée" };
       },
     });
-    const client = graph([{ match: /GET .*\/sentitems\/messages\?/, handle: () => json({ value: [message({ id: "s9", conversationId: "conv-r", sentDateTime: new Date().toISOString() })] }) }]);
+    // Le message trouvé correspond réellement à CET envoi : thread, destinataire et contenu.
+    const client = graph([
+      {
+        match: /GET .*\/sentitems\/messages\?/,
+        handle: () =>
+          json({
+            value: [
+              message({
+                id: "s9",
+                conversationId: "conv-r",
+                subject: "RE: Devis",
+                toRecipients: [{ emailAddress: { address: "client@ext.fr" } }],
+                body: { contentType: "text", content: "Bonjour" },
+                sentDateTime: new Date().toISOString(),
+              }),
+            ],
+          }),
+      },
+    ]);
     const report = await recoverStaleActions({ db, settings, client });
     expect(report.reconciled).toContain(id);
     expect(sent).toBe(0);
@@ -716,6 +759,80 @@ describe("scripts/backup.sh : chiffrement de bout en bout", () => {
   });
 });
 
+describe("scripts/restore.sh : la sauvegarde de sécurité est obligatoire", () => {
+  let root: string;
+
+  function install(envLines: string[]): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ema-safety-"));
+    fs.mkdirSync(path.join(dir, "data"));
+    fs.mkdirSync(path.join(dir, "config"));
+    fs.mkdirSync(path.join(dir, "private", "documents"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "scripts"));
+    for (const f of ["backup.sh", "restore.sh", "db-snapshot.cjs", "backup-crypto.cjs"]) fs.copyFileSync(path.join("scripts", f), path.join(dir, "scripts", f));
+    fs.copyFileSync("package.json", path.join(dir, "package.json"));
+    fs.symlinkSync(path.resolve("node_modules"), path.join(dir, "node_modules"), "dir");
+    fs.writeFileSync(path.join(dir, ".env"), [...envLines, ""].join("\n"));
+    fs.writeFileSync(path.join(dir, "config", "settings.json"), JSON.stringify({ version: 1 }));
+    fs.writeFileSync(path.join(dir, "private", "documents", "facture.pdf"), "archive");
+    return dir;
+  }
+
+  const base = ["DATABASE_PATH=./data/ema.db", "PRIVATE_STORAGE_PATH=./private", "CONFIG_PATH=./config"];
+  const run = (args: string[]) => execFileSync("bash", ["scripts/restore.sh", ...args], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+  /** Rend la sauvegarde impossible sans toucher au reste de l'installation. */
+  function breakBackup(): void {
+    fs.writeFileSync(path.join(root, "scripts", "backup.sh"), "#!/usr/bin/env bash\necho 'espace disque insuffisant' >&2\nexit 1\n");
+  }
+
+  afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("sauvegarde de sécurité en échec → restauration annulée, aucune donnée modifiée", () => {
+    root = install(base);
+    execFileSync("bash", ["scripts/backup.sh"], { cwd: root, encoding: "utf8" });
+    const archive = path.join(root, "backups", fs.readdirSync(path.join(root, "backups")).find((f) => f.startsWith("ema-backup-")) as string);
+    // État courant différent de l'archive : il ne doit pas bouger.
+    fs.writeFileSync(path.join(root, "private", "documents", "facture.pdf"), "état courant");
+    fs.writeFileSync(path.join(root, "config", "settings.json"), JSON.stringify({ version: 2 }));
+    breakBackup();
+
+    let stderr = "";
+    try {
+      run([archive]);
+      throw new Error("la restauration aurait dû être annulée");
+    } catch (err) {
+      stderr = String((err as { stderr?: string }).stderr ?? "");
+    }
+    expect(stderr).toMatch(/RESTAURATION ANNULÉE/);
+    expect(stderr).toMatch(/Aucune donnée actuelle n'a été modifiée/);
+    expect(fs.readFileSync(path.join(root, "private", "documents", "facture.pdf"), "utf8")).toBe("état courant");
+    expect(JSON.parse(fs.readFileSync(path.join(root, "config", "settings.json"), "utf8")).version).toBe(2);
+    expect(fs.readdirSync(path.join(root, "backups")).some((f) => f.startsWith("pre-restore-"))).toBe(false);
+  });
+
+  it("sauvegarde de sécurité réussie → restauration normale", () => {
+    root = install(base);
+    execFileSync("bash", ["scripts/backup.sh"], { cwd: root, encoding: "utf8" });
+    const archive = path.join(root, "backups", fs.readdirSync(path.join(root, "backups")).find((f) => f.startsWith("ema-backup-")) as string);
+    fs.writeFileSync(path.join(root, "private", "documents", "facture.pdf"), "état courant");
+    const out = run([archive]);
+    expect(out).toContain("État courant sauvegardé dans backups/ (pre-restore-*)");
+    expect(fs.readFileSync(path.join(root, "private", "documents", "facture.pdf"), "utf8")).toBe("archive");
+    expect(fs.readdirSync(path.join(root, "backups")).some((f) => f.startsWith("pre-restore-"))).toBe(true);
+  });
+
+  it("--force-without-safety-backup : restauration autorisée avec un avertissement explicite", () => {
+    root = install(base);
+    execFileSync("bash", ["scripts/backup.sh"], { cwd: root, encoding: "utf8" });
+    const archive = path.join(root, "backups", fs.readdirSync(path.join(root, "backups")).find((f) => f.startsWith("ema-backup-")) as string);
+    fs.writeFileSync(path.join(root, "private", "documents", "facture.pdf"), "état courant");
+    breakBackup();
+    const out = execFileSync("bash", ["scripts/restore.sh", archive, "--force-without-safety-backup"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    expect(out).toContain("Restauration terminée");
+    expect(fs.readFileSync(path.join(root, "private", "documents", "facture.pdf"), "utf8")).toBe("archive");
+  });
+});
+
 /* §13 — Extraction PDF réellement interruptible */
 
 describe("Extraction PDF", () => {
@@ -726,5 +843,184 @@ describe("Extraction PDF", () => {
 
   it("un fichier non PDF est refusé avant tout traitement", async () => {
     await expect(extractPdfText(Buffer.from("<html><script>alert(1)</script></html>"), 5)).rejects.toThrow(/n'est pas un PDF/);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Phase 8A.1 — corrections finales
+ * ------------------------------------------------------------------------- */
+
+describe("Démarrage du worker", () => {
+  afterEach(async () => {
+    const { resetBootstrapForTests } = await import("@/lib/bootstrap");
+    resetBootstrapForTests();
+    delete process.env.NODE_ENV_OVERRIDE;
+    resetEnvCache();
+  });
+
+  it("production : configuration bloquante → le worker refuse de démarrer", async () => {
+    const { startWorker } = await import("@/worker/index");
+    const { resetBootstrapForTests } = await import("@/lib/bootstrap");
+    resetBootstrapForTests();
+    const saved = { ...process.env };
+    setEnv("NODE_ENV", "production");
+    setEnv("APP_SECRET", undefined);
+    setEnv("APP_PASSWORD", undefined);
+    setEnv("APP_URL", "https://ema.exemple.fr");
+    resetEnvCache();
+    try {
+      expect(() => startWorker()).toThrow(/Configuration incomplète/);
+      expect(() => startWorker()).toThrow(/APP_SECRET/);
+    } finally {
+      process.env = saved;
+      resetEnvCache();
+    }
+  });
+
+  it("production : mot de passe d'interface trop court → démarrage refusé (pas un simple avertissement)", async () => {
+    const { checkEnv, assertEnvUsable, getEnv } = await import("@/lib/env");
+    const saved = { ...process.env };
+    setEnv("NODE_ENV", "production");
+    setEnv("APP_SECRET", "s".repeat(40));
+    setEnv("APP_PASSWORD", "court123"); // 8 caractères
+    setEnv("APP_URL", "https://ema.exemple.fr");
+    resetEnvCache();
+    try {
+      const issues = checkEnv(getEnv());
+      const password = issues.find((i) => i.variable === "APP_PASSWORD");
+      expect(password?.level).toBe("error");
+      expect(() => assertEnvUsable(getEnv())).toThrow(/APP_PASSWORD/);
+      // Hors production, le même mot de passe reste un simple avertissement.
+      setEnv("NODE_ENV", "development");
+      resetEnvCache();
+      expect(checkEnv(getEnv()).find((i) => i.variable === "APP_PASSWORD")?.level).toBe("warning");
+    } finally {
+      process.env = saved;
+      resetEnvCache();
+    }
+  });
+
+  it("le worker applique le même bootstrap que le web, sans double enregistrement", async () => {
+    const { startWorker } = await import("@/worker/index");
+    const { resetBootstrapForTests, isBootstrapped } = await import("@/lib/bootstrap");
+    const { listTools, resetToolsForTests } = await import("@/tools");
+    const { listExecutorTypes } = await import("@/actions/engine");
+    const { resetDefaultExecutorsForTests } = await import("@/actions/executors");
+    // Process « neuf » : rien n'est enregistré tant que bootstrap() n'a pas tourné.
+    resetBootstrapForTests();
+    resetToolsForTests();
+    resetDefaultExecutorsForTests();
+    clearExecutors();
+    expect(listTools()).toHaveLength(0);
+    expect(listExecutorTypes()).toHaveLength(0);
+
+    const first = startWorker();
+    expect(isBootstrapped()).toBe(true);
+    const tools = listTools().length;
+    const executors = listExecutorTypes().length;
+    expect(tools).toBeGreaterThan(0);
+    expect(executors).toBeGreaterThan(0);
+
+    const second = startWorker(); // second appel : bootstrap ignoré
+    expect(listTools().length).toBe(tools);
+    expect(listExecutorTypes().length).toBe(executors);
+
+    first.stop();
+    second.stop();
+  });
+});
+
+describe("Réconciliation renforcée (une conversation ne prouve rien à elle seule)", () => {
+  let db: Db;
+  const old = new Date(Date.now() - 60 * 60_000).toISOString();
+
+  const graphWith = (sent: unknown[], attachments: { name: string }[] = []) =>
+    new GraphClient({
+      getAccessToken: async () => "t",
+      sleep: noSleep,
+      maxRetries: 0,
+      fetchImpl: fakeFetch([
+        { match: /GET .*\/sentitems\/messages\?/, handle: () => json({ value: sent }) },
+        { match: /GET .*\/messages\/[^/]+\/attachments/, handle: () => json({ value: attachments.map((a, i) => ({ id: `att-${i}`, name: a.name, contentType: "application/pdf", size: 1000, isInline: false })) }) },
+      ]).fetchImpl,
+    });
+
+  beforeEach(() => {
+    db = openIsolatedDb();
+    saveTokenSet({ accessToken: "t", refreshToken: "r", expiresAt: new Date(Date.now() + 3_600_000).toISOString(), scope: "" }, "moi@gomu.fr", db);
+  });
+
+  function ambiguous(type: "reply_email" | "forward_email" | "sign_document", payload: Record<string, unknown>, extra: { documentId?: string } = {}) {
+    const e = emails.insertEmail({ graphId: `g-${type}-${Math.random()}`, threadId: "conv-x", senderEmail: "client@ext.fr", subject: "Devis", receivedAt: "2026-09-15T10:00:00.000Z" }, db);
+    const a = proposeAction({ type, title: type, payload: { email_id: e.id, ...payload } as never, sourceEmailId: e.id, documentId: extra.documentId ?? null }, { db, settings });
+    actionsRepo.transitionAction(a.id, ["WAITING_APPROVAL"], "APPROVED", { approved_at: old }, db);
+    actionsRepo.transitionAction(a.id, ["APPROVED"], "EXECUTING", { executed_at: old }, db);
+    actionsRepo.transitionAction(a.id, ["EXECUTING"], "FAILED", { error: "ambigu", error_code: "DELIVERY_AMBIGUOUS" }, db);
+    return actionsRepo.getAction(a.id, db) as NonNullable<ReturnType<typeof actionsRepo.getAction>>;
+  }
+
+  it("réponse : contenu différent dans la conversation → inconnu, jamais « envoyé »", async () => {
+    const action = ambiguous("reply_email", { body: "Bonjour Kevin, mardi me convient parfaitement pour l'intervention." });
+    const autre = message({ id: "s1", conversationId: "conv-x", subject: "RE: Devis", toRecipients: [{ emailAddress: { address: "client@ext.fr" } }], body: { contentType: "text", content: "Message sans rapport envoyé plus tôt" }, sentDateTime: new Date().toISOString() });
+    const result = await reconcileAction(action, { db, settings, client: graphWith([autre]) });
+    expect(result.verdict).toBe("unknown");
+    expect(result.detail).toMatch(/contenu/);
+  });
+
+  it("réponse : même conversation, même destinataire et même contenu → envoyé", async () => {
+    const body = "Bonjour Kevin, mardi me convient parfaitement pour l'intervention.";
+    const action = ambiguous("reply_email", { body });
+    const vrai = message({ id: "s2", conversationId: "conv-x", subject: "RE: Devis", toRecipients: [{ emailAddress: { address: "client@ext.fr" } }], body: { contentType: "text", content: `${body}\n\nCordialement` }, sentDateTime: new Date().toISOString() });
+    const result = await reconcileAction(action, { db, settings, client: graphWith([vrai]) });
+    expect(result.verdict).toBe("sent");
+  });
+
+  it("transfert : destinataire différent dans la conversation → inconnu", async () => {
+    const action = ambiguous("forward_email", { to: ["nabila@gomu.fr"], comment: "Pour traitement" });
+    const autre = message({ id: "s3", conversationId: "conv-x", toRecipients: [{ emailAddress: { address: "client@ext.fr" } }], sentDateTime: new Date().toISOString() });
+    const result = await reconcileAction(action, { db, settings, client: graphWith([autre]) });
+    expect(result.verdict).toBe("unknown");
+    expect(result.detail).toMatch(/destinataire/);
+
+    const bon = message({ id: "s4", conversationId: "conv-x", toRecipients: [{ emailAddress: { address: "nabila@gomu.fr" } }], sentDateTime: new Date().toISOString() });
+    expect((await reconcileAction(action, { db, settings, client: graphWith([bon]) })).verdict).toBe("sent");
+  });
+
+  it("devis signé : message sans le PDF signé → inconnu ; avec le PDF signé → envoyé", async () => {
+    const e = emails.insertEmail({ graphId: "g-sign-x", threadId: "conv-x", senderEmail: "client@ext.fr", subject: "Devis", receivedAt: "2026-09-15T10:00:00.000Z" }, db);
+    const original = documentsRepo.insertDocument({ emailId: e.id, name: "devis-2026-42.pdf", mimeType: "application/pdf", size: 1000, originalPath: "documents/2026/09/devis-2026-42.pdf", sha256: "c".repeat(64) }, db);
+    const signed = documentsRepo.insertDocument({ emailId: e.id, name: "devis-2026-42.pdf", mimeType: "application/pdf", size: 1200, originalPath: "signed-documents/2026/09/devis-2026-42-signe.pdf", sha256: "d".repeat(64), parentDocumentId: original.id }, db);
+    documentsRepo.updateDocument(original.id, { signed_document_id: signed.id, signed_path: "signed-documents/2026/09/devis-2026-42-signe.pdf" }, db);
+    const a = proposeAction({ type: "sign_document", title: "Signer", payload: { email_id: e.id, document_id: original.id, company_id: "gomu83", reply_body: "Veuillez trouver le devis signé." }, sourceEmailId: e.id, documentId: original.id }, { db, settings });
+    actionsRepo.transitionAction(a.id, ["WAITING_APPROVAL"], "APPROVED", { approved_at: old }, db);
+    actionsRepo.transitionAction(a.id, ["APPROVED"], "EXECUTING", { executed_at: old }, db);
+    const action = actionsRepo.getAction(a.id, db) as NonNullable<ReturnType<typeof actionsRepo.getAction>>;
+
+    const sansPj = message({ id: "s5", conversationId: "conv-x", hasAttachments: false, body: { contentType: "text", content: "Veuillez trouver le devis signé." }, sentDateTime: new Date().toISOString() });
+    const r1 = await reconcileAction(action, { db, settings, client: graphWith([sansPj]) });
+    expect(r1.verdict).toBe("unknown");
+    expect(r1.detail).toMatch(/pièce jointe/);
+
+    const avecMauvaisePj = message({ id: "s6", conversationId: "conv-x", hasAttachments: true, body: { contentType: "text", content: "Veuillez trouver le devis signé." }, sentDateTime: new Date().toISOString() });
+    const r2 = await reconcileAction(action, { db, settings, client: graphWith([avecMauvaisePj], [{ name: "plaquette-commerciale.pdf" }]) });
+    expect(r2.verdict).toBe("unknown");
+
+    const r3 = await reconcileAction(action, { db, settings, client: graphWith([avecMauvaisePj], [{ name: "devis-2026-42-signe.pdf" }]) });
+    expect(r3.verdict).toBe("sent");
+  });
+
+  it("verdict inconnu : la nouvelle tentative est refusée, aucun second envoi", async () => {
+    const action = ambiguous("reply_email", { body: "Bonjour Kevin, mardi me convient parfaitement." });
+    const autre = message({ id: "s7", conversationId: "conv-x", body: { contentType: "text", content: "autre chose" }, sentDateTime: new Date().toISOString() });
+    let posts = 0;
+    const { fetchImpl } = fakeFetch([
+      { match: /GET .*\/sentitems\/messages\?/, handle: () => json({ value: [autre] }) },
+      { match: /POST .*/, handle: () => { posts++; return new Response(null, { status: 202 }); } },
+    ]);
+    const client = new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep, maxRetries: 0 });
+    const { retryAction } = await import("@/actions/engine");
+    await expect(retryAction(action.id, "user", { db, settings, client })).rejects.toThrow(/Vérification humaine requise/);
+    expect(posts).toBe(0);
+    expect(actionsRepo.getAction(action.id, db)?.status).toBe("FAILED");
   });
 });

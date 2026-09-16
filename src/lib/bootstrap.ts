@@ -20,3 +20,13 @@ export function bootstrap(): void {
   registerAllTools();
   g.__emaBootstrapped = true;
 }
+
+/** Oublie l'initialisation (tests uniquement) : le contrôle complet est rejoué. */
+export function resetBootstrapForTests(): void {
+  delete g.__emaBootstrapped;
+}
+
+/** `true` si ce process a déjà été initialisé. */
+export function isBootstrapped(): boolean {
+  return g.__emaBootstrapped === true;
+}

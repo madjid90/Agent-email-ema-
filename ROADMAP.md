@@ -140,6 +140,16 @@ Aucune nouvelle fonctionnalité métier : fiabilité, idempotence, reprise aprè
 - ✅ 45 tests de durcissement dédiés (289 tests au total), aucun envoi réel, aucune donnée client, aucun secret réel
 - ⛔ **Blocage de livraison** : le dépôt GitHub `madjid90/Agent-email-ema-` doit être **passé en privé manuellement** avant tout déploiement commercial (Settings → General → Danger Zone → Change repository visibility). Action humaine : aucun code ne modifie la visibilité du dépôt.
 
+## PHASE 8A.1 — Corrections finales avant VPS ✅
+
+- ✅ Worker démarré par `bootstrap()` (mêmes contrôles que le web, sans double enregistrement) ; démarrage refusé en production si la configuration est bloquante
+- ✅ Restauration : sauvegarde de sécurité pré-restauration obligatoire ; en cas d'échec, arrêt avant toute modification (`--force-without-safety-backup` en dernier recours)
+- ✅ Adresse client : `X-Forwarded-For` jamais lu ; `X-Real-IP` seulement si `TRUST_PROXY_HEADER=true`, avec la configuration Nginx correspondante documentée
+- ✅ Réconciliation renforcée : conversation + destinataire / contenu / pièce jointe signée selon le type d'action ; correspondance partielle → `unknown`
+- ✅ `APP_PASSWORD` < 12 caractères : erreur bloquante en production
+- ✅ `stop()` de l'ordonnanceur annule aussi le premier tick différé
+- ✅ 11 tests supplémentaires (300 au total)
+
 ## V2 — fonctionnalités reportées (hors périmètre V1)
 
 Aucune de ces fonctionnalités n'est nécessaire au premier pilote. Elles sont listées ici pour éviter qu'elles ne s'invitent dans la V1.

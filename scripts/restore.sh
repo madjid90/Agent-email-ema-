@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Restauration d'une sauvegarde EMA. Arrêter EMA avant (pm2 stop all).
-# Usage : ./scripts/restore.sh chemin/vers/ema-backup-XXXX.tar.gz
+# Usage : ./scripts/restore.sh chemin/vers/ema-backup-XXXX.tar.gz[.enc] [--force-without-safety-backup]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ARCHIVE="${1:-}"
-[ -f "$ARCHIVE" ] || { echo "Usage : $0 <archive.tar.gz>"; exit 1; }
+ARCHIVE=""
+FORCE_WITHOUT_SAFETY="no"
+for arg in "$@"; do
+  if [ "$arg" = "--force-without-safety-backup" ]; then FORCE_WITHOUT_SAFETY="yes"; elif [ -z "$ARCHIVE" ]; then ARCHIVE="$arg"; fi
+done
+[ -n "$ARCHIVE" ] && [ -f "$ARCHIVE" ] || { echo "Usage : $0 <archive.tar.gz[.enc]> [--force-without-safety-backup]"; exit 1; }
 
 DB_PATH="./data/ema.db"; PRIV="./private"; CFG="./config"
 if [ -f "$ROOT/.env" ]; then
@@ -36,15 +40,43 @@ esac
 
 # Sauvegarde de sécurité de l'état courant, écrite hors de backups/ puis déposée
 # sous un nom distinct (pre-restore-*), sans renommer aucune archive existante.
+# Elle est OBLIGATOIRE : sans filet, une restauration ratée détruirait l'état
+# courant sans retour possible. Rien n'est modifié tant qu'elle n'a pas réussi.
 SAFE="$WORK/safety"
+SAFE_OK="no"
+SAFE_ERROR=""
 mkdir -p "$SAFE" "$ROOT/backups"
-if "$ROOT/scripts/backup.sh" "$SAFE" --keep 0 >/dev/null 2>&1; then
+if SAFE_ERROR="$("$ROOT/scripts/backup.sh" "$SAFE" --keep 0 2>&1)"; then
   SAFE_FILE="$(ls -t "$SAFE"/ema-backup-*.tar.gz "$SAFE"/ema-backup-*.tar.gz.enc 2>/dev/null | head -1 || true)"
   if [ -n "$SAFE_FILE" ]; then
     case "$SAFE_FILE" in *.enc) SAFE_EXT="tar.gz.enc";; *) SAFE_EXT="tar.gz";; esac
     mv "$SAFE_FILE" "$ROOT/backups/pre-restore-$(date +%Y%m%d-%H%M%S).$SAFE_EXT"
     echo "État courant sauvegardé dans backups/ (pre-restore-*)"
+    SAFE_OK="yes"
+  else
+    SAFE_ERROR="la sauvegarde de sécurité n'a produit aucune archive"
   fi
+fi
+
+if [ "$SAFE_OK" != "yes" ]; then
+  if [ "$FORCE_WITHOUT_SAFETY" != "yes" ]; then
+    echo "" >&2
+    echo "RESTAURATION ANNULÉE : la sauvegarde de sécurité de l'état courant a échoué." >&2
+    echo "Aucune donnée actuelle n'a été modifiée." >&2
+    echo "Détail : ${SAFE_ERROR:-cause inconnue}" >&2
+    echo "" >&2
+    echo "Corriger la cause (espace disque, droits, BACKUP_ENCRYPTION_PASSWORD absent en production)," >&2
+    echo "puis relancer. En dernier recours seulement : $0 $ARCHIVE --force-without-safety-backup" >&2
+    exit 1
+  fi
+  echo "" >&2
+  echo "########################################################################" >&2
+  echo "# AVERTISSEMENT : restauration SANS sauvegarde de sécurité             #" >&2
+  echo "# L'état courant (base, documents, signatures, configuration) va être   #" >&2
+  echo "# écrasé DÉFINITIVEMENT et ne pourra pas être récupéré.                 #" >&2
+  echo "# Raison de l'échec : ${SAFE_ERROR:-cause inconnue}" >&2
+  echo "########################################################################" >&2
+  echo "" >&2
 fi
 
 tar -xzf "$WORK/source.tar.gz" -C "$WORK"

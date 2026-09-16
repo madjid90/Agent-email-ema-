@@ -115,13 +115,22 @@ server {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        # X-Real-IP est la SEULE source d'adresse à laquelle EMA fait confiance.
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # $remote_addr, et non $proxy_add_x_forwarded_for : un X-Forwarded-For
+        # envoyé par le client ne doit jamais être conservé ni complété.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;
     }
 }
 ```
+
+### Adresse client et limitation des tentatives
+
+- **V1 (recommandé) : `TRUST_PROXY_HEADER=false`.** EMA est mono-utilisateur ; la limitation de connexion s'applique globalement (5 tentatives / 15 min, blocage 15 min). Aucun en-tête n'est lu, donc aucun en-tête ne permet de la contourner.
+- `TRUST_PROXY_HEADER=true` n'a de sens **que** si la configuration ci-dessus est appliquée : EMA n'utilise alors que `X-Real-IP` (fixé par Nginx à `$remote_addr`). `X-Forwarded-For` n'est jamais lu, même dans ce mode. Si `X-Real-IP` est absent ou illisible, EMA retombe sur la clé globale.
+- Ne jamais exposer le port 3000 directement : sans Nginx devant, l'adresse vue par EMA serait celle de la connexion directe et `X-Real-IP` proviendrait du client.
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/ema /etc/nginx/sites-enabled/ema
@@ -212,7 +221,13 @@ pm2 start all
 
 Une archive `.enc` est déchiffrée dans un dossier temporaire (supprimé à la fin, même en cas d'erreur) avec le `BACKUP_ENCRYPTION_PASSWORD` du `.env` ou de l'environnement. Mot de passe incorrect ou archive altérée → la restauration s'arrête **avant** d'écrire quoi que ce soit.
 
-Le script sauvegarde l'état courant dans `backups/pre-restore-*` avant d'écraser quoi que ce soit, puis vérifie l'intégrité SQLite après restauration.
+Le script sauvegarde l'état courant dans `backups/pre-restore-*` **avant** d'écraser quoi que ce soit, puis vérifie l'intégrité SQLite après restauration.
+
+**Cette sauvegarde de sécurité est obligatoire.** Si elle échoue (disque plein, droits, `BACKUP_ENCRYPTION_PASSWORD` absent en production), la restauration est **annulée avant toute modification** : l'état courant reste intact. Corriger la cause puis relancer. En dernier recours uniquement, et en acceptant de perdre définitivement l'état courant :
+
+```bash
+./scripts/restore.sh backups/ema-backup-….tar.gz.enc --force-without-safety-backup
+```
 
 ## 12. Mise à jour
 

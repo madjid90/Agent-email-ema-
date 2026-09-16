@@ -48,15 +48,21 @@ export interface SchedulerHandle {
 /** Boucle simple : chaque tâche a son propre setInterval, sans chevauchement grâce au verrou. */
 export function startScheduler(tasks: WorkerTask[]): SchedulerHandle {
   const workerId = newId("wrk");
-  const timers = tasks.map((task) => {
+  // Le premier tick différé est mémorisé au même titre que l'intervalle : après
+  // `stop()`, plus aucune tâche ne doit démarrer (arrêt du worker, tests).
+  const timers: NodeJS.Timeout[] = [];
+  for (const task of tasks) {
     const tick = () => void runTaskOnce(task, workerId);
-    setTimeout(tick, 1000);
-    return setInterval(tick, task.intervalSeconds * 1000);
-  });
+    timers.push(setTimeout(tick, 1000));
+    timers.push(setInterval(tick, task.intervalSeconds * 1000));
+  }
   log.info("scheduler started", { tasks: tasks.map((t) => `${t.name}@${t.intervalSeconds}s`) });
   return {
     stop: () => {
-      for (const t of timers) clearInterval(t);
+      for (const t of timers) {
+        clearTimeout(t);
+        clearInterval(t);
+      }
       log.info("scheduler stopped");
     },
   };

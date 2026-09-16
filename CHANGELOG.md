@@ -2,6 +2,25 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [1.0.2] — Phase 8A.1 — Corrections finales avant VPS — 2026-09-16
+
+Corrections uniquement : aucune nouvelle fonctionnalité, aucun changement d'architecture.
+
+### Corrigé
+- **Worker** : `src/worker/index.ts` n'appliquait qu'une partie des contrôles de démarrage (ni `assertEnvUsable`, ni `hardenSensitiveFiles`, ni création des fichiers de configuration). Il utilise maintenant `bootstrap()`, exactement comme l'application web, de façon idempotente (aucun double enregistrement des exécuteurs et des tools). En production, une configuration bloquante **empêche le worker de démarrer** : message explicite et code de sortie 1.
+- **`APP_PASSWORD`** : en production, un mot de passe de moins de 12 caractères devient une **erreur bloquante** au lieu d'un avertissement. Hors production, l'avertissement reste inchangé.
+- **Restauration** : `restore.sh` poursuivait la restauration même quand la sauvegarde de sécurité de l'état courant échouait — l'état courant pouvait donc être écrasé sans filet. Elle est désormais obligatoire : en cas d'échec, la restauration est **annulée avant toute modification**, avec la cause affichée. Exception explicite : `--force-without-safety-backup`, précédée d'un avertissement en clair.
+- **`X-Forwarded-For`** : plus jamais lu, y compris avec `TRUST_PROXY_HEADER=true`. Seul `X-Real-IP`, fixé par Nginx à `$remote_addr`, fait foi ; absent ou illisible, EMA retombe sur la clé globale. La configuration Nginx documentée réécrit `X-Forwarded-For` avec `$remote_addr` (au lieu de `$proxy_add_x_forwarded_for`) afin de ne jamais conserver une valeur fournie par le client.
+- **Réconciliation** : un `conversationId` identique ne suffisait plus à conclure « envoyé » alors qu'un autre message du même fil pouvait correspondre. Selon le type d'action, EMA exige désormais aussi : réponse et relance → contenu réellement préparé + destinataire d'origine ; transfert → destinataire attendu ; devis signé → présence du PDF signé attendu (métadonnées de pièces jointes, lues avec `Mail.Read`, sans permission supplémentaire). Toute correspondance partielle donne `unknown` (vérification humaine demandée), jamais un faux `sent`, et jamais de second envoi automatique.
+- **Ordonnanceur** : `stop()` n'annulait pas le premier tick différé (`setTimeout` de 1 s) ; une tâche pouvait donc démarrer après l'arrêt du worker, y compris sur une base déjà fermée. Les deux minuteries sont maintenant annulées.
+
+### Ajouté
+- `resetBootstrapForTests()` / `isBootstrapped()`, `resetDefaultExecutorsForTests()`, `listExecutorTypes()` : outillage de test, sans effet en production.
+- 11 tests (300 au total) : refus de démarrage du worker en production, bootstrap unique, `APP_PASSWORD` bloquant, sauvegarde de sécurité en échec / réussie / forcée, réconciliation renforcée (contenu, destinataire, pièce jointe signée), contournement du rate limit par `X-Forwarded-For` impossible avec la configuration Nginx recommandée.
+
+### Documentation
+- `docs/deployment.md` (configuration Nginx et adresse client, restauration), `SECURITY.md` (§9 quater), `ROADMAP.md`.
+
 ## [1.0.1] — Phase 8A — Durcissement production — 2026-09-16
 
 Aucune nouvelle fonctionnalité métier. Architecture des phases 0 à 8 inchangée.

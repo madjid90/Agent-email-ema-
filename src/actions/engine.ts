@@ -31,6 +31,11 @@ export function clearExecutors(): void {
   executors.clear();
 }
 
+/** Types d'actions actuellement exécutables (diagnostic, tests). */
+export function listExecutorTypes(): ActionType[] {
+  return [...executors.keys()];
+}
+
 /* Options (injection pour les tests) ------------------------------------ */
 
 export interface EngineOptions {

@@ -95,6 +95,15 @@
 - **Pièces jointes sortantes** : au-delà de `OUTGOING_ATTACHMENT_MAX_MB` (3 Mo par défaut), l'envoi est refusé **avant** l'appel à Graph et un envoi manuel est demandé (pas d'upload session, pas de `Mail.ReadWrite`).
 - **Extraction PDF** : exécutée dans un *worker thread* réellement arrêté au-delà de `PDF_EXTRACTION_TIMEOUT_SECONDS` (20 s) — un PDF pathologique ne peut pas bloquer EMA.
 
+## 9 quater. Corrections finales (phase 8A.1)
+
+- **Worker** : `src/worker/index.ts` passe par le même `bootstrap()` que l'application web (validation d'environnement, `private/`/`data/` créés et resserrés, configuration, base, exécuteurs, tools), idempotent donc sans double enregistrement. En production, une configuration bloquante **empêche le worker de démarrer** (sortie en code 1) au lieu de le laisser tourner à moitié configuré.
+- **`APP_PASSWORD`** : en production, un mot de passe de moins de 12 caractères est désormais une **erreur bloquante** (auparavant un simple avertissement) — l'interface donne accès à toute la boîte mail, aux documents et aux validations.
+- **Restauration** : la sauvegarde de sécurité pré-restauration est obligatoire. Si elle échoue, la restauration est annulée **avant toute modification** ; `--force-without-safety-backup` reste possible en dernier recours, avec un avertissement explicite.
+- **Adresse client** : `X-Forwarded-For` n'est plus jamais lu. Avec `TRUST_PROXY_HEADER=true`, seul `X-Real-IP` (fixé par Nginx à `$remote_addr`) fait foi ; absent ou illisible, EMA retombe sur la clé globale. La configuration Nginx documentée réécrit les deux en-têtes, donc un en-tête envoyé par un attaquant ne permet pas de changer de clé à chaque tentative.
+- **Réconciliation renforcée** : une même conversation ne suffit plus à conclure « envoyé ». Réponse et relance exigent aussi le contenu réellement préparé et le destinataire d'origine ; un transfert, le destinataire attendu ; un devis signé, la présence de la pièce jointe signée (métadonnées lisibles avec `Mail.Read`). Toute correspondance partielle donne `unknown` (vérification humaine), jamais un faux `sent` ni un second envoi.
+- **Ordonnanceur** : `stop()` annule aussi le premier tick différé — après l'arrêt, plus aucune tâche ne démarre (notamment sur une base déjà fermée).
+
 ## 9 bis. Exploitation (phase 8)
 
 - **Démarrage refusé** si la configuration est incomplète en production (secret, mot de passe, `APP_URL` en HTTPS, WhatsApp partiellement configuré). Le message nomme la variable ; aucun démarrage partiellement sécurisé.

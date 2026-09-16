@@ -58,23 +58,58 @@ function searchSince(action: ActionRow): string {
   return new Date(new Date(base).getTime() - 2 * 60_000).toISOString();
 }
 
-/** Cherche la trace réelle de l'envoi correspondant à une action. */
+/** Nom du fichier réellement joint à l'envoi d'un devis signé, si connu. */
+function signedAttachmentName(action: ActionRow, db: Db): string | null {
+  if (!action.document_id) return null;
+  const doc = documentsRepo.getDocument(action.document_id, db);
+  if (!doc) return null;
+  const signed = doc.signed_document_id ? documentsRepo.getDocument(doc.signed_document_id, db) : null;
+  const name = signed?.name ?? doc.name;
+  // L'exécuteur renomme la copie signée « <nom>-signe.pdf » au moment de l'envoi.
+  return signed && !/-signe\.pdf$/i.test(name) ? `${name.replace(/\.pdf$/i, "")}-signe.pdf` : name;
+}
+
+/**
+ * Cherche la trace réelle de l'envoi correspondant à une action.
+ *
+ * La conversation n'est jamais une preuve à elle seule (phase 8A.1) : selon le
+ * type d'action, on exige aussi le destinataire attendu, le contenu réellement
+ * préparé et/ou la pièce jointe signée. À défaut de correspondance complète, le
+ * verdict est `unknown` — jamais un faux `sent`, jamais un second envoi.
+ */
 export async function reconcileAction(action: ActionRow, deps: RecoveryDeps = {}): Promise<ReconcileResult> {
   const { db } = resolve(deps);
   const client = graphOf(deps, db);
   if (!client) return { verdict: "unknown", message: null, detail: "Outlook n'est pas connecté : vérification impossible" };
   const payload = parseJson<Record<string, unknown>>(action.payload, {});
   const since = searchSince(action);
+  const text = (key: string): string | null => (typeof payload[key] === "string" ? (payload[key] as string) : null);
 
   const emailId = typeof payload.email_id === "string" ? payload.email_id : action.source_email_id;
-  const threadOf = (id: string | null): string | null => (id ? emailsRepo.getEmail(id, db)?.thread_id ?? null : null);
+  const sourceEmail = emailId ? emailsRepo.getEmail(emailId, db) : null;
+  const conversationId = sourceEmail?.thread_id ?? null;
+  const payloadTo = Array.isArray(payload.to) ? (payload.to as string[]) : [];
 
-  if (action.type === "reply_email" || action.type === "forward_email" || action.type === "send_followup" || action.type === "sign_document") {
-    return reconcileSentMessage(client, { conversationId: threadOf(emailId), since });
+  if (action.type === "reply_email" || action.type === "send_followup") {
+    // Réponse dans le thread : contenu préparé + destinataire d'origine quand il est connu.
+    const replyTo = sourceEmail?.sender_email ? [sourceEmail.sender_email] : [];
+    return reconcileSentMessage(client, { conversationId, to: replyTo, bodyContains: text("body") ?? text("reply_body"), since });
   }
-  const to = Array.isArray(payload.to) ? (payload.to as string[]) : [];
-  const subject = typeof payload.subject === "string" ? payload.subject : null;
-  return reconcileSentMessage(client, { subject, to, since });
+  if (action.type === "forward_email") {
+    return reconcileSentMessage(client, { conversationId, to: payloadTo, since });
+  }
+  if (action.type === "sign_document") {
+    // Le devis signé doit être joint au message envoyé (métadonnées lisibles avec Mail.Read).
+    return reconcileSentMessage(client, {
+      conversationId,
+      bodyContains: text("reply_body"),
+      attachmentName: signedAttachmentName(action, db),
+      expectAttachment: true,
+      since,
+    });
+  }
+  // Nouvel email (paiement, acompte, envoi direct) : objet ET destinataire, plus le contenu si disponible.
+  return reconcileSentMessage(client, { subject: text("subject"), to: payloadTo, bodyContains: text("body"), since });
 }
 
 export interface AmbiguityOutcome {

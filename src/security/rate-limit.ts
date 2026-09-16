@@ -78,15 +78,33 @@ export function clearRateLimits(db: Db = getDb()): void {
   db.prepare("DELETE FROM rate_limits").run();
 }
 
+/** Une adresse IPv4 ou IPv6 plausible ; tout le reste est ignoré. */
+function parseIp(value: string | null): string | null {
+  const ip = (value ?? "").trim();
+  if (!ip || ip.length > 45) return null;
+  return /^[0-9.]+$|^[0-9a-fA-F:.]+$/.test(ip) ? ip : null;
+}
+
 /**
- * Clé de regroupement. `X-Forwarded-For` n'est utilisé que si l'installation
- * garantit que Nginx le réécrit (`TRUST_PROXY_HEADER=true`) : sinon l'en-tête
- * est falsifiable et permettrait de contourner la limite en la changeant à
- * chaque essai — on retombe alors sur une clé globale, EMA étant mono-utilisateur.
+ * Clé de regroupement des tentatives.
+ *
+ * Par défaut (`TRUST_PROXY_HEADER=false`, recommandé en V1 mono-utilisateur) :
+ * clé globale. Aucun en-tête n'est lu, donc aucun en-tête ne permet de
+ * contourner la limite.
+ *
+ * Avec `TRUST_PROXY_HEADER=true`, seul **`X-Real-IP`** fait foi : la
+ * configuration Nginx documentée le fixe à `$remote_addr`, il ne peut donc pas
+ * venir du client. `X-Forwarded-For` n'est JAMAIS lu : un client peut l'envoyer,
+ * et le conserver permettrait de changer de clé à chaque tentative. Si
+ * `X-Real-IP` est absent ou illisible (proxy mal configuré), on retombe sur la
+ * clé globale plutôt que sur une valeur fournie par l'appelant.
  */
 export function clientKey(req: Request, prefix = "login"): string {
   if (!getEnv().TRUST_PROXY_HEADER) return `${prefix}:global`;
-  const forwarded = req.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "local";
-  return `${prefix}:${ip.slice(0, 45)}`;
+  const ip = parseIp(req.headers.get("x-real-ip"));
+  if (!ip) {
+    log.warn("trusted proxy configured but X-Real-IP missing: falling back to a global key");
+    return `${prefix}:global`;
+  }
+  return `${prefix}:${ip}`;
 }
