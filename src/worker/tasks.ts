@@ -1,8 +1,12 @@
 import { expireApprovals } from "@/actions/engine";
+import { recoverStaleActions } from "@/actions/recovery";
+import { listStaleWebhookEvents, failWebhookEvent } from "@/database/repositories/webhook-events";
+import { logHistory } from "@/database/repositories/history";
 import { listFollowups } from "@/database/repositories/followups";
 import { processDueFollowups, reconcileFollowups, notifyFollowup } from "@/followups/service";
 import { getSettings } from "@/lib/config";
 import { kvSet } from "@/database/repositories/kv";
+import { getDb } from "@/database/connection";
 import { createConnectedGraphClient, isOutlookConnected, syncInbox } from "@/integrations/microsoft";
 import { analyzePendingEmails } from "@/agent/orchestrator";
 import { notifyUnsentApprovals, isWhatsappConfigured } from "@/integrations/whatsapp";
@@ -74,6 +78,31 @@ export const processFollowupsTask: WorkerTask = {
     if (reconciled.length || results.length || renotified) {
       log.info("followups processed", { reconciled: reconciled.length, due: results.length, renotified, outcomes: results.map((r) => r.outcome) });
     }
+  },
+};
+
+/**
+ * Reprise après interruption (phase 8A). Une action validée mais jamais exécutée
+ * repart ; une action interrompue en cours d'exécution est réconciliée avec
+ * Outlook — jamais rejouée à l'aveugle. Les webhooks bloqués en PROCESSING sont
+ * remis en état reprenable plutôt que perdus.
+ */
+export const recoverStaleActionsTask: WorkerTask = {
+  name: "recover_stale_actions",
+  intervalSeconds: 60,
+  lockTtlSeconds: 300,
+  run: async () => {
+    const report = await recoverStaleActions();
+    if (report.resumed.length || report.reconciled.length || report.ambiguous.length) {
+      log.info("stale actions recovered", { resumed: report.resumed.length, reconciled: report.reconciled.length, ambiguous: report.ambiguous.length, skipped: report.skipped.length });
+    }
+    let released = 0;
+    for (const event of listStaleWebhookEvents(20)) {
+      failWebhookEvent(event.provider, event.external_id, "Traitement interrompu : événement repris", getDb());
+      logHistory({ eventType: "webhook.interrupted", message: `Événement ${event.provider} interrompu (tentative ${event.attempts}) : redevenu reprenable`, actor: "system" });
+      released++;
+    }
+    if (released) log.info("stale webhook events released", { released });
   },
 };
 

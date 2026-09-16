@@ -27,7 +27,33 @@ export interface RequestOptions {
   query?: Record<string, string | number | undefined>;
   headers?: Record<string, string>;
   body?: unknown;
+  /**
+   * `true` : la requête peut être rejouée sans effet de bord (GET, HEAD).
+   * `false` : un envoi d'email — une réponse perdue signifie que Microsoft a
+   * peut-être déjà envoyé le message. Défaut : déduit de la méthode.
+   */
+  idempotent?: boolean;
 }
+
+/**
+ * Envoi transmis à Microsoft sans réponse exploitable (coupure réseau, 5xx,
+ * délai dépassé). Le message a PEUT-ÊTRE été envoyé : ne jamais rejouer
+ * automatiquement, ne jamais conclure « non envoyé ».
+ */
+export class DeliveryAmbiguousError extends EmaError {
+  readonly httpStatus: number | null;
+  constructor(message: string, httpStatus: number | null, cause?: unknown) {
+    super("DELIVERY_AMBIGUOUS", message, { details: { httpStatus }, cause });
+    this.name = "DeliveryAmbiguousError";
+    this.httpStatus = httpStatus;
+  }
+}
+
+export function isDeliveryAmbiguous(err: unknown): err is DeliveryAmbiguousError {
+  return err instanceof EmaError && err.code === "DELIVERY_AMBIGUOUS";
+}
+
+const AMBIGUOUS_HINT = "Résultat inconnu : Microsoft a peut-être déjà envoyé le message. Vérification humaine requise avant toute nouvelle tentative.";
 
 export class GraphError extends EmaError {
   readonly httpStatus: number;
@@ -66,12 +92,19 @@ export class GraphClient {
     return u.toString().replace(/%24/g, "$");
   }
 
-  /** Requête brute avec gestion des erreurs et des retries. */
+  /**
+   * Requête brute avec gestion des erreurs et des retries.
+   * Les requêtes NON idempotentes (envoi d'email) ne sont jamais rejouées quand
+   * le résultat est ambigu : réseau coupé, 5xx, délai dépassé. Seuls un 401
+   * (requête rejetée avant traitement, rejouée après rafraîchissement du token)
+   * et un 429 (rejetée par la limitation de débit) sont sûrs à rejouer.
+   */
   async raw(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
     let token = await this.opts.getAccessToken();
     let unauthorizedRetried = false;
     let attempt = 0;
     const url = this.url(path, options.query);
+    const idempotent = options.idempotent ?? isIdempotentMethod(method);
     for (;;) {
       const headers: Record<string, string> = { authorization: `Bearer ${token}`, accept: "application/json", ...options.headers };
       const init: RequestInit = { method, headers };
@@ -83,6 +116,8 @@ export class GraphClient {
       try {
         res = await this.opts.fetchImpl(url, init);
       } catch (err) {
+        // La requête est partie : impossible de savoir si Microsoft l'a traitée.
+        if (!idempotent) throw new DeliveryAmbiguousError(`Microsoft Graph injoignable pendant l'envoi. ${AMBIGUOUS_HINT}`, null, err);
         if (attempt < this.opts.maxRetries) {
           attempt++;
           await this.opts.sleep(backoff(attempt));
@@ -100,13 +135,22 @@ export class GraphClient {
           continue;
         }
       }
-      if ((res.status === 429 || res.status === 503 || res.status === 504 || res.status === 500 || res.status === 502) && attempt < this.opts.maxRetries) {
+      // 429 : la requête a été refusée avant traitement, un nouvel essai est sûr.
+      const throttled = res.status === 429;
+      const transient = throttled || res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504;
+      if (transient && (idempotent || throttled) && attempt < this.opts.maxRetries) {
         attempt++;
         const retryAfter = Number(res.headers.get("retry-after"));
-        const wait = res.status === 429 && Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, MAX_RETRY_AFTER_MS) : backoff(attempt);
-        log.warn("graph transient error, retrying", { status: res.status, attempt, waitMs: wait });
+        const wait = throttled && Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, MAX_RETRY_AFTER_MS) : backoff(attempt);
+        log.warn("graph transient error, retrying", { status: res.status, attempt, waitMs: wait, idempotent });
         await this.opts.sleep(wait);
         continue;
+      }
+      if (transient && !idempotent) {
+        // 5xx sur un envoi : Microsoft a pu accepter puis échouer à répondre.
+        const err = await toGraphError(res);
+        log.warn("graph send result ambiguous", { status: res.status });
+        throw new DeliveryAmbiguousError(`${err.message}. ${AMBIGUOUS_HINT}`, res.status, err);
       }
       throw await toGraphError(res);
     }
@@ -124,8 +168,9 @@ export class GraphClient {
     return this.request<T>("GET", path, { query, headers });
   }
 
-  post<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
-    return this.request<T>("POST", path, { body, headers });
+  /** POST : non idempotent par défaut (aucun rejeu automatique en cas d'ambiguïté). */
+  post<T>(path: string, body: unknown, headers?: Record<string, string>, idempotent = false): Promise<T> {
+    return this.request<T>("POST", path, { body, headers, idempotent });
   }
 
   async getBinary(path: string): Promise<Buffer> {
@@ -145,6 +190,11 @@ export class GraphClient {
     }
     return out.slice(0, limit);
   }
+}
+
+function isIdempotentMethod(method: string): boolean {
+  const m = method.toUpperCase();
+  return m === "GET" || m === "HEAD" || m === "OPTIONS";
 }
 
 function backoff(attempt: number): number {

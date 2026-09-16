@@ -128,7 +128,7 @@ describe("Routage WhatsApp : autorisation, dédoublonnage, classement", () => {
   it("message dupliqué (même identifiant Meta) : traité une seule fois", async () => {
     const e = seedEmail(db);
     const wa = fakeWhatsapp();
-    const anthropic = fakeAnthropic([], [...turn("send_email", { to: ["christophe.sl@gomu.fr"], subject: "Devis", body: "Bonjour Christophe, peux-tu m'envoyer le devis ?" }, "J'ai préparé l'email pour Christophe.")]);
+    const anthropic = fakeAnthropic([], [...turn("prepare_send_email", { contact_id: "chris1", subject: "Devis", body: "Bonjour Christophe, peux-tu m'envoyer le devis ?" }, "J'ai préparé l'email pour Christophe.")]);
     const evt = textEvent("Rédige un mail à Christophe pour le devis", APPROVER, "wamid.dup");
     const first = await handleWhatsappEvent(evt, deps({ db, wa, anthropic }));
     const second = await handleWhatsappEvent(evt, deps({ db, wa, anthropic }));
@@ -143,8 +143,8 @@ describe("Routage WhatsApp : autorisation, dédoublonnage, classement", () => {
     const e = seedEmail(db);
     const action = pendingReply(db, e.id);
     const g = graphOk();
-    registerExecutor(createOutlookExecutors({ db, client: g.client })[0]!);
-    for (const ex of createOutlookExecutors({ db, client: g.client }).slice(1)) registerExecutor(ex);
+    registerExecutor(createOutlookExecutors({ db, client: g.client, contacts, settings })[0]!);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings }).slice(1)) registerExecutor(ex);
     saveTokenSet({ accessToken: "t", refreshToken: "r", expiresAt: new Date(Date.now() + 3_600_000).toISOString(), scope: "" }, "moi@gomu.fr", db);
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [textTurn("jamais")]);
@@ -266,9 +266,9 @@ describe("Préparation d'actions depuis WhatsApp (jamais d'effet direct)", () =>
 
   it("rédaction d'un email : action WAITING_APPROVAL, carte de validation envoyée, aucun envoi Outlook", async () => {
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
-    const anthropic = fakeAnthropic([], [toolTurn("search_contacts", { query: "Christophe", internal_only: true }), toolTurn("send_email", { to: ["christophe.sl@gomu.fr"], subject: "Devis", body: "Bonjour Christophe,\n\nPeux-tu m'envoyer le devis avant demain ?\n\nCordialement,\nMadjid" }, "tu2"), textTurn("EMAIL PRÉPARÉ\nÀ : Christophe Sainte-Luce\nObjet : Devis")]);
+    const anthropic = fakeAnthropic([], [toolTurn("search_contacts", { query: "Christophe", internal_only: true }), toolTurn("prepare_send_email", { contact_id: "chris1", subject: "Devis", body: "Bonjour Christophe,\n\nPeux-tu m'envoyer le devis avant demain ?\n\nCordialement,\nMadjid" }, "tu2"), textTurn("EMAIL PRÉPARÉ\nÀ : Christophe Sainte-Luce\nObjet : Devis")]);
     const r = await handleWhatsappEvent(textEvent("Rédige un email à Christophe pour lui demander le devis avant demain"), deps({ db, wa, anthropic }));
     expect(r.outcome).toBe("action_proposed");
     const action = actions.getAction(r.actionIds[0]!, db)!;
@@ -386,7 +386,8 @@ describe("Préparation d'actions depuis WhatsApp (jamais d'effet direct)", () =>
     await handleWhatsappEvent(textEvent("Bonjour"), deps({ db, wa, anthropic }));
     const exposed = toolNamesOf(anthropic.chatCalls[0]!.params);
     expect(exposed.sort()).toEqual([...WHATSAPP_TOOLS].sort());
-    for (const forbidden of ["apply_signature", "apply_stamp", "get_new_emails", "send_whatsapp_notification", "request_approval", "archive_document"]) {
+    // Les outils prenant une adresse libre ne sont plus exposés (phase 8A).
+    for (const forbidden of ["apply_signature", "apply_stamp", "get_new_emails", "send_whatsapp_notification", "request_approval", "archive_document", "send_email", "forward_email"]) {
       expect(exposed).not.toContain(forbidden);
     }
     // Tous les outils de préparation créent une action soumise à validation.
@@ -424,7 +425,7 @@ describe("Validation en langage naturel", () => {
     const e = seedEmail(db);
     const action = pendingReply(db, e.id);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [textTurn("jamais appelé")]);
     const r = await handleWhatsappEvent(textEvent("valide"), deps({ db, wa, anthropic }));
@@ -439,7 +440,7 @@ describe("Validation en langage naturel", () => {
     const e = seedEmail(db);
     const action = pendingReply(db, e.id);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [textTurn("jamais")]);
     const r = await handleWhatsappEvent(textEvent("annule"), deps({ db, wa, anthropic }));
@@ -455,7 +456,7 @@ describe("Validation en langage naturel", () => {
     const a1 = pendingReply(db, e1.id, "Réponse Kevin");
     const a2 = pendingReply(db, e2.id, "Réponse Alexandre");
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [textTurn("jamais")]);
     const ask = await handleWhatsappEvent(textEvent("valide", APPROVER, "wamid.v1"), deps({ db, wa, anthropic }));
@@ -479,7 +480,7 @@ describe("Validation en langage naturel", () => {
     const e = seedEmail(db);
     const action = pendingReply(db, e.id);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [textTurn("Il n'y a plus rien à valider.")]);
     const evt = textEvent("valide", APPROVER, "wamid.same");
@@ -544,7 +545,7 @@ describe("Erreurs et protections", () => {
     const e = seedEmail(db);
     const action = pendingReply(db, e.id);
     const bad = graphFailing();
-    for (const ex of createOutlookExecutors({ db, client: bad.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: bad.client, contacts, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [textTurn("x")]);
     const r = await handleWhatsappEvent(textEvent("valide"), deps({ db, wa, anthropic }));
@@ -578,12 +579,12 @@ describe("Erreurs et protections", () => {
   it("aucune action directe hors Action Engine : chaque outil de préparation crée une action à valider", async () => {
     const e = seedEmail(db);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     registerExecutor(createSigningExecutor({ db, client: g.client, settings }));
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [
       toolTurn("reply_email", { email_id: e.id, body: "A" }, "t1"),
-      toolTurn("send_email", { to: ["nabila@gomu.fr"], subject: "S", body: "B" }, "t2"),
+      toolTurn("prepare_send_email", { contact_id: "nabila", subject: "S", body: "B" }, "t2"),
       textTurn("Deux propositions sont prêtes."),
     ]);
     const r = await handleWhatsappEvent(textEvent("Réponds à Kevin et écris à Nabila"), deps({ db, wa, anthropic }));

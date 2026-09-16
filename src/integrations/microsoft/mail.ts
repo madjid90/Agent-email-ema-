@@ -138,6 +138,16 @@ export async function findLatestSentInConversation(client: GraphClient, conversa
   return candidates[0] ?? null;
 }
 
+/** Messages envoyés depuis un instant donné (réconciliation après envoi ambigu). */
+export async function listSentSince(client: GraphClient, sinceIso: string, max = 25): Promise<GraphMessage[]> {
+  const items = await client.getAll<GraphMessage>(
+    "/me/mailFolders/sentitems/messages",
+    { $filter: `sentDateTime ge ${sinceIso}`, $select: MESSAGE_SELECT, $top: Math.min(max, 50), $orderby: "sentDateTime desc" },
+    { limit: max, headers: TEXT_BODY_HEADER },
+  );
+  return items.sort((a, b) => (b.sentDateTime ?? "").localeCompare(a.sentDateTime ?? ""));
+}
+
 /* Envoi : primitives appelées UNIQUEMENT par les exécuteurs de l'Action Engine ---- */
 
 export interface OutgoingAttachment {

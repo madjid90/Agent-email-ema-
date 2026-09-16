@@ -78,8 +78,22 @@
 
 ## 9. Sauvegardes
 
-- `scripts/backup.sh` : `data/ema.db` (via `sqlite3 .backup` si disponible, sinon copie), `private/documents`, `private/signed-documents`, `private/signatures`, `private/stamps`, `config/`.
-- Les sauvegardes contiennent des données sensibles : à chiffrer/transférer par le client selon sa politique.
+- `scripts/backup.sh` : `data/ema.db` (copie cohérente via l'API `backup` de better-sqlite3, vérifiée), `private/documents`, `private/signed-documents`, `private/signatures`, `private/stamps`, `config/`.
+- **Chiffrement (phase 8A)** : si `BACKUP_ENCRYPTION_PASSWORD` est renseigné, l'archive est chiffrée en AES-256-GCM (clé dérivée par scrypt, `scripts/backup-crypto.cjs`), l'archive en clair est effacée (`shred` si disponible) et seule `*.tar.gz.enc` est conservée, en droits `600`. Le mot de passe n'est ni journalisé ni affiché, et n'apparaît dans aucun message d'erreur.
+- **En production, une sauvegarde non chiffrée est refusée** (`--allow-plaintext` pour passer outre en connaissance de cause) ; hors production, un avertissement est affiché.
+- Sans le mot de passe, une archive chiffrée est définitivement illisible : le conserver hors du VPS (gestionnaire de mots de passe de l'agence).
+
+## 9 ter. Durcissement (phase 8A)
+
+- **Documents servis** : seul un PDF authentique est affiché en ligne. HTML, SVG, XHTML, XML, `.eml`… sont forcés en `application/octet-stream`, en `Content-Disposition: attachment`, avec `nosniff`, une CSP `default-src 'none'; sandbox` et `X-Frame-Options: DENY` : un document reçu par email ne peut pas s'exécuter dans l'origine EMA (`src/lib/content-safety.ts`).
+- **Envois jamais rejoués à l'aveugle** : une coupure réseau ou un 5xx pendant un `POST` d'envoi produit `DELIVERY_AMBIGUOUS`. Avant toute nouvelle tentative, EMA cherche la trace réelle du message dans les éléments envoyés (`reconcileSentMessage`) ; verdict `sent` → action terminée sans renvoi, `not_sent` → nouvelle tentative possible, `unknown` → vérification humaine explicite. **Dans le doute, on n'envoie pas deux fois.**
+- **Verrous du worker** : un verrou n'est accordé que s'il est absent ou réellement expiré ; chaque exécution possède un propriétaire unique (`worker:tâche:run`), donc une tâche encore en cours ne peut pas se relancer elle-même.
+- **Événements entrants** : `RECEIVED → PROCESSING → PROCESSED | FAILED`, verrou à durée limitée. Un message interrompu déjà enregistré n'est jamais rejoué : EMA demande de le renvoyer plutôt que de risquer une seconde action.
+- **Destinataires** : le modèle ne fournit jamais d'adresse mais un `contact_id` ; `validateOutboundRecipients()` revérifie chaque adresse juste avant l'envoi (contact configuré, destinataire de règle, participant réel du thread, boîte du client). Toute autre adresse est refusée (`FORBIDDEN`).
+- **Reprise après interruption** : une action validée jamais exécutée repart ; une action interrompue en cours d'exécution est réconciliée, jamais rejouée ; un devis déjà signé n'est jamais re-signé.
+- **Connexion** : 5 tentatives par 15 minutes puis blocage 15 minutes, compteur persisté en SQLite (survit à un redémarrage). `X-Forwarded-For` n'est pris en compte que si `TRUST_PROXY_HEADER=true` ; aucun mot de passe n'est journalisé.
+- **Pièces jointes sortantes** : au-delà de `OUTGOING_ATTACHMENT_MAX_MB` (3 Mo par défaut), l'envoi est refusé **avant** l'appel à Graph et un envoi manuel est demandé (pas d'upload session, pas de `Mail.ReadWrite`).
+- **Extraction PDF** : exécutée dans un *worker thread* réellement arrêté au-delà de `PDF_EXTRACTION_TIMEOUT_SECONDS` (20 s) — un PDF pathologique ne peut pas bloquer EMA.
 
 ## 9 bis. Exploitation (phase 8)
 
@@ -94,12 +108,20 @@
 
 ## 10. Checklist avant mise en production
 
+> ### ⛔ BLOCAGE DE LIVRAISON — dépôt public
+>
+> Le dépôt `madjid90/Agent-email-ema-` est **public**. Aucun déploiement commercial chez un client ne doit avoir lieu tant qu'il n'a pas été **passé en privé manuellement** sur GitHub (Settings → General → Danger Zone → Change repository visibility → Private).
+> Cette opération est **manuelle et humaine** : aucun code d'EMA ne modifie la visibilité du dépôt.
+> Le code ne contient aucun secret (vérifié), mais un dépôt public expose l'architecture complète, les règles métier et la logique de validation d'un produit commercial.
+
+- [ ] **Dépôt GitHub passé en privé** (bloquant, action manuelle)
+- [ ] `BACKUP_ENCRYPTION_PASSWORD` renseigné et conservé hors du VPS ; sauvegarde chiffrée testée
 - [ ] `.env` complet, `APP_SECRET` ≥ 32 caractères aléatoires, `APP_PASSWORD` fort
 - [ ] HTTPS actif, port 3000 fermé au public
 - [ ] Webhook WhatsApp vérifié (`WHATSAPP_APP_SECRET`)
 - [ ] `config/` sans secret
 - [ ] `npm audit` sans vulnérabilité critique en runtime
-- [ ] Sauvegarde testée (`backup.sh` + `restore.sh`), rétention et copie chiffrée hors VPS
+- [ ] Sauvegarde testée (`backup.sh` + `restore.sh`), archive `*.tar.gz.enc`, rétention et copie hors VPS
 - [ ] `npm run doctor` sans FAIL
 - [ ] `/api/health` répond et ne contient aucun secret
 - [ ] En-têtes de sécurité présents (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy)

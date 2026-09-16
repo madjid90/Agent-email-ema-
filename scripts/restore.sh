@@ -20,16 +20,29 @@ trap 'rm -rf "$WORK"' EXIT
 
 # L'archive à restaurer est copiée AVANT toute écriture : la sauvegarde de
 # sécurité ci-dessous écrit dans backups/ et ne doit jamais pouvoir l'écraser.
-cp "$ARCHIVE" "$WORK/source.tar.gz"
+case "$ARCHIVE" in
+  *.enc)
+    if [ -z "${BACKUP_ENCRYPTION_PASSWORD:-}" ] && [ -f "$ROOT/.env" ]; then
+      BACKUP_ENCRYPTION_PASSWORD="$(grep -E '^BACKUP_ENCRYPTION_PASSWORD=' "$ROOT/.env" | cut -d= -f2- || true)"
+      export BACKUP_ENCRYPTION_PASSWORD
+    fi
+    node "$ROOT/scripts/backup-crypto.cjs" decrypt "$ARCHIVE" "$WORK/source.tar.gz" || { echo "Restauration interrompue : archive chiffrée illisible."; exit 1; }
+    echo "Archive chiffrée déchiffrée dans un dossier temporaire."
+    ;;
+  *)
+    cp "$ARCHIVE" "$WORK/source.tar.gz"
+    ;;
+esac
 
 # Sauvegarde de sécurité de l'état courant, écrite hors de backups/ puis déposée
 # sous un nom distinct (pre-restore-*), sans renommer aucune archive existante.
 SAFE="$WORK/safety"
 mkdir -p "$SAFE" "$ROOT/backups"
 if "$ROOT/scripts/backup.sh" "$SAFE" --keep 0 >/dev/null 2>&1; then
-  SAFE_FILE="$(ls -t "$SAFE"/ema-backup-*.tar.gz 2>/dev/null | head -1 || true)"
+  SAFE_FILE="$(ls -t "$SAFE"/ema-backup-*.tar.gz "$SAFE"/ema-backup-*.tar.gz.enc 2>/dev/null | head -1 || true)"
   if [ -n "$SAFE_FILE" ]; then
-    mv "$SAFE_FILE" "$ROOT/backups/pre-restore-$(date +%Y%m%d-%H%M%S).tar.gz"
+    case "$SAFE_FILE" in *.enc) SAFE_EXT="tar.gz.enc";; *) SAFE_EXT="tar.gz";; esac
+    mv "$SAFE_FILE" "$ROOT/backups/pre-restore-$(date +%Y%m%d-%H%M%S).$SAFE_EXT"
     echo "État courant sauvegardé dans backups/ (pre-restore-*)"
   fi
 fi

@@ -5,7 +5,7 @@ import { createLogger } from "@/lib/logger";
 import { registerDefaultExecutors } from "@/actions/executors";
 import { registerAllTools } from "@/tools";
 import { startScheduler } from "./scheduler";
-import { analyzeDocumentsTask, analyzeEmailsTask, expireApprovalsTask, heartbeatTask, notifyApprovalsTask, processFollowupsTask, scanMailboxTask } from "./tasks";
+import { analyzeDocumentsTask, analyzeEmailsTask, expireApprovalsTask, heartbeatTask, notifyApprovalsTask, processFollowupsTask, recoverStaleActionsTask, scanMailboxTask } from "./tasks";
 
 const log = createLogger("worker.main");
 
@@ -16,7 +16,7 @@ function main(): void {
   registerDefaultExecutors();
   registerAllTools();
 
-  const handle = startScheduler([heartbeatTask, scanMailboxTask(env.WORKER_POLL_INTERVAL), analyzeEmailsTask, analyzeDocumentsTask, notifyApprovalsTask, processFollowupsTask, expireApprovalsTask]);
+  const handle = startScheduler([heartbeatTask, scanMailboxTask(env.WORKER_POLL_INTERVAL), analyzeEmailsTask, analyzeDocumentsTask, notifyApprovalsTask, processFollowupsTask, recoverStaleActionsTask, expireApprovalsTask]);
   log.info("EMA worker started", { pollInterval: env.WORKER_POLL_INTERVAL });
 
   const shutdown = (signal: string) => {

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck · lint · tests · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Valeurs factices : aucun secret réel n'est nécessaire (aucun test ne sort du process).
+      NODE_ENV: test
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm run check (typecheck + lint + tests + build)
+        run: npm run check
+
+  audit:
+    name: audit des dépendances de production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Échec uniquement sur une vulnérabilité HIGH ou CRITICAL d'une dépendance
+      # réellement exécutée en production (les devDependencies ne tournent pas sur le VPS).
+      - name: npm audit --omit=dev
+        run: npm audit --omit=dev --audit-level=high

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineTool, actionRefSchema } from "../types";
+import { defineTool, actionRefSchema, type ToolContext } from "../types";
 import { proposeAction } from "@/actions/engine";
 import { EmaError } from "@/lib/errors";
 import { formatAmount } from "@/lib/time";
@@ -9,9 +9,18 @@ import { formatAmount } from "@/lib/time";
  * et créent une action HIGH (validation obligatoire).
  */
 
-function resolveRecipient(explicit: string | undefined, ctx: { settings: { company: { email: string } }; contacts: { id: string; email: string; role: string }[] }, keyword: RegExp): string {
-  if (explicit) return explicit;
-  const contact = ctx.contacts.find((c) => keyword.test(c.role));
+/**
+ * Destinataire d'une demande de règlement : contact interne configuré au rôle
+ * comptable, sinon la boîte du client. Le modèle ne peut PLUS imposer d'adresse
+ * (phase 8A) ; il peut seulement désigner un `contact_id` configuré.
+ */
+function resolveRecipient(contactId: string | null | undefined, ctx: ToolContext, keyword: RegExp): string {
+  if (contactId) {
+    const chosen = ctx.contacts.find((c) => c.id === contactId && c.internal);
+    if (!chosen) throw new EmaError("VALIDATION", `Contact interne « ${contactId} » inconnu : une demande de règlement ne part que vers un contact configuré.`);
+    return chosen.email;
+  }
+  const contact = ctx.contacts.find((c) => c.internal && keyword.test(c.role));
   if (contact) return contact.email;
   if (ctx.settings.company.email) return ctx.settings.company.email;
   throw new EmaError("CONFIG", "Aucun destinataire configuré pour les demandes de paiement");
@@ -29,11 +38,11 @@ export const preparePaymentRequest = defineTool({
     currency: z.string().default("EUR"),
     due_date: z.string().nullable().default(null),
     subject: z.string(),
-    to: z.string().email().optional(),
+    contact_id: z.string().nullable().default(null).describe("Contact interne configuré (sinon : contact au rôle comptabilité)"),
   }),
   output: actionRefSchema.extend({ draft: z.string() }),
   handler: async (input, ctx) => {
-    const to = resolveRecipient(input.to, ctx, /compta|paiement|finance/i);
+    const to = resolveRecipient(input.contact_id, ctx, /compta|paiement|finance/i);
     const amount = input.amount !== null ? ` (montant : ${formatAmount(input.amount, input.currency)})` : "";
     const due = input.due_date ? `, échéance le ${input.due_date}` : "";
     const body = `Bonjour,\n\nPeux-tu procéder au règlement de ${input.supplier} concernant « ${input.subject} »${amount}${due} ?\n\nMerci.\n\n${ctx.settings.agent.signatureText}`.trim();
@@ -61,11 +70,11 @@ export const prepareDepositRequest = defineTool({
     project: z.string(),
     amount: z.number().nullable().default(null),
     currency: z.string().default("EUR"),
-    to: z.string().email().optional(),
+    contact_id: z.string().nullable().default(null).describe("Contact interne configuré (sinon : contact au rôle comptabilité)"),
   }),
   output: actionRefSchema.extend({ draft: z.string() }),
   handler: async (input, ctx) => {
-    const to = resolveRecipient(input.to, ctx, /compta|paiement|finance/i);
+    const to = resolveRecipient(input.contact_id, ctx, /compta|paiement|finance/i);
     const amount = input.amount !== null ? ` (montant : ${formatAmount(input.amount, input.currency)})` : "";
     const body = `Bonjour,\n\nPeux-tu procéder au règlement de l'acompte concernant le projet ${input.project} auprès de ${input.supplier}${amount} ?\n\nMerci.\n\n${ctx.settings.agent.signatureText}`.trim();
     const a = proposeAction(

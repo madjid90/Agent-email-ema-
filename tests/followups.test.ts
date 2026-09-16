@@ -344,7 +344,7 @@ describe("Cycle de vie d'une relance", () => {
     const f = makeFollowup(db, { emailId: outbound.id, reason: "Retour attendu" });
     makeDue(db, f.id);
     const g = graphThread([message({ id: "g-out", conversationId: "conv-1", from: { emailAddress: { address: "moi@gomu.fr" } }, receivedDateTime: "2026-09-12T09:00:00Z", sentDateTime: "2026-09-12T09:00:00Z" })]);
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const r = await processFollowup(f.id, { db, settings, graph: g.client, client: fakeAnthropic([{ output: DRAFT }]).client, whatsapp: wa.client, approverPhone: APPROVER });
     const apr = approvals.getPendingApprovalForAction(r.actionId!, db)!;
@@ -365,7 +365,7 @@ describe("Cycle de vie d'une relance", () => {
     const f = makeFollowup(db, { emailId: outbound.id, reason: "Retour attendu" });
     makeDue(db, f.id);
     const g = graphThread([message({ id: "g-out", conversationId: "conv-1", from: { emailAddress: { address: "moi@gomu.fr" } }, receivedDateTime: "2026-09-12T09:00:00Z", sentDateTime: "2026-09-12T09:00:00Z" })]);
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, settings })) registerExecutor(ex);
     const r = await processFollowup(f.id, { db, settings, graph: g.client, client: fakeAnthropic([{ output: DRAFT }]).client, whatsapp: fakeWhatsapp().client, approverPhone: APPROVER });
     rejectAction(r.actionId!, "whatsapp", "Refusé", { db, settings });
     reconcileFollowups({ db, settings });

@@ -150,6 +150,21 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 - `src/followups/service.ts` : programmation, traitement des échéances (verrou atomique `SCHEDULED → CHECKING`, vérification Microsoft Graph obligatoire), création de l'action `reply_email`, réconciliation avec l'Action Engine, report, annulation, rappels internes, notifications proactives.
 - Tâche worker `process_followups` (5 min, sous verrou SQLite). Détails : `docs/followups.md`.
 
+## 10 bis. Durcissement (phase 8A)
+
+Aucune nouvelle fonctionnalité métier : fiabilité, idempotence et reprise.
+
+- `src/lib/content-safety.ts` — politique de restitution des fichiers privés (PDF en ligne, tout le reste en pièce jointe neutralisée).
+- `src/integrations/microsoft/graph-client.ts` — `RequestOptions.idempotent` ; un `POST` d'envoi n'est jamais rejoué sur coupure réseau ou 5xx (`DeliveryAmbiguousError`, code `DELIVERY_AMBIGUOUS`) ; seuls 401 (rejet avant traitement) et 429 sont rejoués.
+- `src/integrations/microsoft/reconcile.ts` — recherche de l'envoi réel dans les éléments envoyés : verdict `sent` / `not_sent` / `unknown`, jamais de conclusion à partir d'une lecture Graph ratée.
+- `src/actions/recovery.ts` — `recoverStaleActions()` (tâche worker toutes les 60 s) : `APPROVED` jamais exécutée → exécution ; `EXECUTING` interrompue → réconciliation ; document déjà signé → jamais re-signé.
+- `src/agent/recipients.ts` — résolution `contact_id → adresse` et `validateOutboundRecipients()` appelé dans chaque exécuteur d'envoi.
+- `src/database/repositories/webhook-events.ts` — `claimWebhookEvent()` atomique, statut `RECEIVED → PROCESSING → PROCESSED | FAILED`, verrou de 120 s, reprise contrôlée après crash.
+- `src/database/repositories/locks.ts` — propriétaire unique par exécution, `renewLock` / `releaseLock` / `currentLock`.
+- `src/security/rate-limit.ts` — limitation persistée (table `rate_limits`).
+- `src/documents/extract-text.ts` — extraction PDF dans un *worker thread* réellement arrêtable.
+- Migration `009_hardening` : `actions.error_code`, cycle de vie des `webhook_events`, table `rate_limits`.
+
 ## 11. Déploiement
 
 Ubuntu VPS : Node 20+, PM2 (`ema-web`, `ema-worker`), Nginx reverse proxy, Certbot HTTPS. Voir `docs/deployment.md`.

@@ -183,14 +183,46 @@ export function editActionPayload(actionId: string, patch: Record<string, unknow
   return actionsRepo.getAction(actionId, db) as ActionRow;
 }
 
-/** Nouvelle tentative explicite d'une action FAILED (déjà validée). */
-export async function retryAction(actionId: string, actor: string, opts: EngineOptions = {}): Promise<ActionRow> {
+export interface RetryOptions extends EngineOptions {
+  /**
+   * `true` : l'utilisateur a vérifié lui-même dans Outlook et assume le renvoi.
+   * Sans cela, une action au résultat ambigu n'est jamais rejouée.
+   */
+  force?: boolean;
+  /** Client Graph utilisé pour la réconciliation (tests, worker). */
+  client?: import("@/integrations/microsoft/graph-client").GraphClient | null;
+  /** Réconciliation injectable (tests). */
+  reconcile?: (action: ActionRow) => Promise<{ verdict: "sent" | "not_sent" | "unknown"; detail: string }>;
+}
+
+/**
+ * Nouvelle tentative explicite d'une action FAILED (déjà validée).
+ * Si le dernier échec est un envoi au résultat inconnu, EMA cherche d'abord la
+ * trace réelle dans les éléments envoyés : message trouvé → action terminée sans
+ * second envoi ; doute persistant → refus, vérification humaine demandée.
+ */
+export async function retryAction(actionId: string, actor: string, opts: RetryOptions = {}): Promise<ActionRow> {
   const { db } = resolve(opts);
   const action = requireAction(actionId, db);
-  if (!actionsRepo.transitionAction(actionId, "FAILED", "APPROVED", { error: null, completed_at: null }, db)) {
+
+  if (action.error_code === "DELIVERY_AMBIGUOUS" && !opts.force) {
+    const { reconcileAction, AMBIGUOUS_MESSAGE } = await import("./recovery");
+    const check = opts.reconcile ? await opts.reconcile(action) : await reconcileAction(action, { db, settings: opts.settings, client: opts.client });
+    if (check.verdict === "sent") {
+      actionsRepo.transitionAction(actionId, "FAILED", "COMPLETED", { completed_at: nowIso(), error: null, error_code: null, result: JSON.stringify({ reconciled: true, detail: check.detail }) }, db);
+      logHistory({ eventType: "action.reconciled", message: `Envoi déjà effectué (${check.detail}) : aucun second envoi`, actor: "user", actionId, emailId: action.source_email_id }, db);
+      return actionsRepo.getAction(actionId, db) as ActionRow;
+    }
+    if (check.verdict === "unknown") {
+      logHistory({ eventType: "action.ambiguous", message: `Nouvelle tentative refusée : ${check.detail}`, actor: "user", actionId, emailId: action.source_email_id }, db);
+      throw new EmaError("CONFLICT", `${AMBIGUOUS_MESSAGE} (${check.detail})`);
+    }
+  }
+
+  if (!actionsRepo.transitionAction(actionId, "FAILED", "APPROVED", { error: null, error_code: null, completed_at: null }, db)) {
     throw new EmaError("INVALID_TRANSITION", `Action ${actionId} en statut ${action.status} : nouvelle tentative impossible`);
   }
-  logHistory({ eventType: "action.retry", message: `Nouvelle tentative demandée (${actor})`, actor: "user", actionId, emailId: action.source_email_id }, db);
+  logHistory({ eventType: "action.retry", message: `Nouvelle tentative demandée (${actor})${opts.force ? " après vérification humaine" : ""}`, actor: "user", actionId, emailId: action.source_email_id }, db);
   return executeAction(actionId, opts);
 }
 
@@ -226,13 +258,16 @@ export async function executeAction(actionId: string, opts: EngineOptions = {}):
       sourceEmailId: action.source_email_id,
     });
     const finalStatus: ActionStatus = result.ok ? "COMPLETED" : "FAILED";
-    actionsRepo.transitionAction(actionId, "EXECUTING", finalStatus, { completed_at: nowIso(), error: result.ok ? null : result.summary, result: JSON.stringify(result.data ?? null) }, db);
+    actionsRepo.transitionAction(actionId, "EXECUTING", finalStatus, { completed_at: nowIso(), error: result.ok ? null : result.summary, error_code: result.ok ? null : "EXECUTION_FAILED", result: JSON.stringify(result.data ?? null) }, db);
     logHistory({ eventType: result.ok ? "action.completed" : "action.failed", message: result.summary, actor: "ema", actionId, emailId: action.source_email_id, details: result.data }, db);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erreur inconnue";
-    actionsRepo.transitionAction(actionId, "EXECUTING", "FAILED", { completed_at: nowIso(), error: message }, db);
-    logHistory({ eventType: "action.failed", message: `Échec : ${message}`, actor: "system", actionId, emailId: action.source_email_id }, db);
-    log.error("action execution failed", { actionId, type, message });
+    // Envoi au résultat inconnu : l'action est marquée comme telle et ne sera
+    // jamais rejouée automatiquement (voir src/actions/recovery.ts).
+    const ambiguous = err instanceof EmaError && err.code === "DELIVERY_AMBIGUOUS";
+    actionsRepo.transitionAction(actionId, "EXECUTING", "FAILED", { completed_at: nowIso(), error: message, error_code: ambiguous ? "DELIVERY_AMBIGUOUS" : "EXECUTION_FAILED" }, db);
+    logHistory({ eventType: ambiguous ? "action.ambiguous" : "action.failed", message: ambiguous ? `Envoi au résultat inconnu : ${message}` : `Échec : ${message}`, actor: "system", actionId, emailId: action.source_email_id }, db);
+    log.error("action execution failed", { actionId, type, message, ambiguous });
   }
   return actionsRepo.getAction(actionId, db) as ActionRow;
 }

@@ -169,15 +169,30 @@ pm2 set pm2-logrotate:compress true
 ## 10. Sauvegarde
 
 ```bash
-./scripts/backup.sh                # crée backups/ema-backup-YYYYMMDD-HHMMSS.tar.gz
+./scripts/backup.sh                # crée backups/ema-backup-YYYYMMDD-HHMMSS.tar.gz.enc
 ./scripts/backup.sh /mnt/backups   # destination personnalisée
 ```
+
+### Chiffrement des sauvegardes (obligatoire en production)
+
+Renseigner dans `.env` :
+
+```
+BACKUP_ENCRYPTION_PASSWORD=<phrase longue, 12 caractères minimum>
+```
+
+L'archive est alors chiffrée en **AES-256-GCM**, avec une clé dérivée par **scrypt** (`scripts/backup-crypto.cjs`, uniquement le module `crypto` de Node). La copie en clair est effacée (`shred` si disponible) et seule `ema-backup-*.tar.gz.enc` est conservée, en droits `600`. Le mot de passe n'est jamais journalisé ni affiché.
+
+- **Sans `BACKUP_ENCRYPTION_PASSWORD`, la sauvegarde est refusée en production** ; `./scripts/backup.sh backups --allow-plaintext` permet de passer outre en connaissance de cause (déconseillé).
+- Hors production, un avertissement est affiché et l'archive reste en clair.
+- **Conserver le mot de passe hors du VPS** (gestionnaire de mots de passe de l'agence) : sans lui, l'archive est définitivement illisible. Le perdre équivaut à perdre la sauvegarde.
+- Vérifier une archive : `BACKUP_ENCRYPTION_PASSWORD=… node scripts/backup-crypto.cjs decrypt backups/ema-backup-*.tar.gz.enc /tmp/test.tar.gz && tar -tzf /tmp/test.tar.gz | head && rm -f /tmp/test.tar.gz`.
 
 Contenu : `data/ema.db` (copie cohérente via l'API `backup` de better-sqlite3, vérifiée par `PRAGMA integrity_check`), `private/documents`, `private/signed-documents`, `private/signatures`, `private/stamps`, `config/*.json`, plus un fichier `backup.json` (version, date, hôte, compteurs de lignes).
 
 **`.env` n'est jamais sauvegardé** : il contient les secrets et se recrée à l'installation. Conserver les secrets dans le gestionnaire de mots de passe de l'agence.
 
-Rétention : les 7 dernières archives sont conservées (`./scripts/backup.sh /home/ema/backups --keep 14` pour changer). Chaque archive est en droits `600`.
+Rétention : les 7 dernières archives (chiffrées ou non) sont conservées (`./scripts/backup.sh /home/ema/backups --keep 14` pour changer). Chaque archive est en droits `600`.
 
 Planifier (cron, tous les jours à 3h) :
 
@@ -185,17 +200,19 @@ Planifier (cron, tous les jours à 3h) :
 0 3 * * * cd /home/ema/ema && ./scripts/backup.sh /home/ema/backups >> /home/ema/backup.log 2>&1
 ```
 
-Les archives contiennent des données client : les copier hors du VPS de façon chiffrée (`rsync` vers un stockage chiffré, ou `age`/`gpg` avant transfert). Aucun service cloud n'est requis.
+Les archives contiennent des données client : elles sont déjà chiffrées si `BACKUP_ENCRYPTION_PASSWORD` est renseigné, et peuvent alors être copiées hors du VPS telles quelles (`rsync`, disque externe). Aucun service cloud n'est requis.
 
 ## 11. Restauration
 
 ```bash
 pm2 stop all
-./scripts/restore.sh backups/ema-backup-20260915-030000.tar.gz
+./scripts/restore.sh backups/ema-backup-20260915-030000.tar.gz.enc
 pm2 start all
 ```
 
-Le script sauvegarde l'état courant dans `backups/pre-restore-*.tar.gz` avant d'écraser quoi que ce soit.
+Une archive `.enc` est déchiffrée dans un dossier temporaire (supprimé à la fin, même en cas d'erreur) avec le `BACKUP_ENCRYPTION_PASSWORD` du `.env` ou de l'environnement. Mot de passe incorrect ou archive altérée → la restauration s'arrête **avant** d'écrire quoi que ce soit.
+
+Le script sauvegarde l'état courant dans `backups/pre-restore-*` avant d'écraser quoi que ce soit, puis vérifie l'intégrité SQLite après restauration.
 
 ## 12. Mise à jour
 
@@ -221,6 +238,25 @@ pm2 restart all
 6. `https://ema.client.fr/setup` redirige vers `/login` sans session.
 7. `curl -I https://ema.client.fr/login` → `Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`.
 8. `./scripts/backup.sh` puis `./scripts/restore.sh` sur une instance de test → intégrité `ok`.
+
+## 13 bis. ⛔ Blocage de livraison : dépôt public
+
+Le dépôt `madjid90/Agent-email-ema-` est **public**. Avant tout déploiement commercial chez un client :
+
+1. GitHub → dépôt → **Settings** → **General** → **Danger Zone** → **Change repository visibility** → **Private**.
+2. Vérifier que les collaborateurs nécessaires ont encore accès.
+3. Sur le VPS, si le dépôt est cloné via HTTPS, reconfigurer l'accès (jeton ou clé de déploiement) : un `git pull` anonyme ne fonctionnera plus.
+
+Cette opération est **manuelle** : aucun code d'EMA ne modifie la visibilité du dépôt, et aucun script ne doit le faire. Le code ne contient aucun secret, mais un dépôt public expose l'architecture complète et la logique métier d'un produit commercial.
+
+## 13 ter. Intégration continue
+
+`.github/workflows/ci.yml` exécute à chaque push et pull request, sur Node 22 :
+
+- `npm ci` puis `npm run check` (typecheck, lint, tests, build) ;
+- `npm audit --omit=dev --audit-level=high` : échec uniquement sur une vulnérabilité **haute ou critique** d'une dépendance réellement exécutée en production.
+
+Aucun secret n'est nécessaire : aucun test ne sort du process (Graph, Anthropic et WhatsApp sont simulés).
 
 ## 14. Dépannage
 

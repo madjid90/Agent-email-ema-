@@ -12,6 +12,8 @@ export interface ApprovalCardProps {
   draft: string | null;
   editable: boolean;
   actionError: string | null;
+  /** Dernier échec au résultat inconnu : aucun renvoi automatique. */
+  ambiguous?: boolean;
   documentId: string | null;
   whatsappConfigured: boolean;
   /** Devis : libellés et état après signature. */
@@ -106,6 +108,11 @@ export function ApprovalCard(p: ApprovalCardProps) {
         {pending && !editing ? <button className="btn danger" disabled={busy !== null} onClick={() => void call("reject")}>Refuser</button> : null}
         {pending && !editing && (p.approvalStatus === "EXPIRED" || (!p.notified && p.whatsappConfigured)) ? <button className="btn" disabled={busy !== null} onClick={() => void call("notify")}>{busy === "notify" ? "…" : "Renvoyer la demande"}</button> : null}
         {p.actionStatus === "FAILED" ? <button className="btn primary" disabled={busy !== null} onClick={() => void call("retry")}>{busy === "retry" ? "…" : p.sign?.signedDocumentId ? "Réessayer l'envoi (copie signée conservée)" : "Réessayer"}</button> : null}
+        {p.actionStatus === "FAILED" && p.ambiguous ? (
+          <button className="btn danger" disabled={busy !== null} onClick={() => void call("retry", { force: true })} title="À n'utiliser qu'après avoir vérifié dans Outlook que le message n'est pas parti">
+            {busy === "retry" ? "…" : "J'ai vérifié, renvoyer"}
+          </button>
+        ) : null}
       </div>
     </div>
   );

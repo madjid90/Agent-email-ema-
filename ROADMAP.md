@@ -122,6 +122,24 @@ Légende : ✅ terminé · 🔄 en cours · ⏳ à faire
 - ✅ Installation neuve validée (clone, `npm ci`, migrations, doctor, build, démarrage, sécurité, import, sauvegarde/restauration) ; 243 tests
 - ⏳ Reporté : tests E2E avec credentials réels (Microsoft, Anthropic, Meta) et VPS — à cocher à la mise en service (`docs/e2e-report.md`)
 
+## PHASE 8A — Durcissement production ✅
+
+Aucune nouvelle fonctionnalité métier : fiabilité, idempotence, reprise après interruption, surface d'attaque.
+
+- ✅ Restitution des documents : PDF en ligne uniquement, HTML/SVG/XML/`.eml` neutralisés (`octet-stream`, `attachment`, `nosniff`, CSP `sandbox`) — plus aucun contenu reçu par email ne peut s'exécuter dans l'origine EMA
+- ✅ Envois Microsoft jamais rejoués à l'aveugle : `DELIVERY_AMBIGUOUS` sur coupure réseau ou 5xx, seuls 401 et 429 rejoués
+- ✅ Réconciliation avec les éléments envoyés avant toute nouvelle tentative (`sent` / `not_sent` / `unknown`) ; dans le doute, vérification humaine, jamais de second envoi
+- ✅ Verrous worker : propriétaire unique par exécution, aucun verrou actif repris ; `renewLock` / `releaseLock`
+- ✅ Événements entrants : cycle `RECEIVED → PROCESSING → PROCESSED | FAILED`, reprise après crash, jamais de seconde action pour un message interrompu
+- ✅ Destinataires déterministes : `contact_id` côté modèle, `validateOutboundRecipients()` avant chaque envoi
+- ✅ Reprise des actions interrompues (tâche worker) ; un devis déjà signé n'est jamais re-signé
+- ✅ Connexion : 5 tentatives / 15 min persistées en SQLite, `X-Forwarded-For` ignoré sauf `TRUST_PROXY_HEADER=true`
+- ✅ Sauvegardes chiffrées AES-256-GCM (scrypt), refusées en clair en production ; restauration déchiffrée en dossier temporaire
+- ✅ Pièces jointes sortantes limitées (`OUTGOING_ATTACHMENT_MAX_MB`) avant tout appel Graph ; extraction PDF dans un *worker thread* réellement arrêtable
+- ✅ Intégration continue GitHub (Node 22, `npm run check`, `npm audit --omit=dev` sur vulnérabilités hautes/critiques runtime)
+- ✅ 45 tests de durcissement dédiés (289 tests au total), aucun envoi réel, aucune donnée client, aucun secret réel
+- ⛔ **Blocage de livraison** : le dépôt GitHub `madjid90/Agent-email-ema-` doit être **passé en privé manuellement** avant tout déploiement commercial (Settings → General → Danger Zone → Change repository visibility). Action humaine : aucun code ne modifie la visibilité du dépôt.
+
 ## V2 — fonctionnalités reportées (hors périmètre V1)
 
 Aucune de ces fonctionnalités n'est nécessaire au premier pilote. Elles sont listées ici pour éviter qu'elles ne s'invitent dans la V1.

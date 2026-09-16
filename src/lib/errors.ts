@@ -14,6 +14,8 @@ export type EmaErrorCode =
   | "INTEGRATION"
   | "APPROVAL_REQUIRED"
   | "INVALID_TRANSITION"
+  /** Envoi transmis à Microsoft sans réponse exploitable : résultat inconnu. */
+  | "DELIVERY_AMBIGUOUS"
   | "INTERNAL";
 
 export class EmaError extends Error {
@@ -50,6 +52,7 @@ function defaultStatus(code: EmaErrorCode): number {
     case "NOT_IMPLEMENTED":
       return 501;
     case "INTEGRATION":
+    case "DELIVERY_AMBIGUOUS":
       return 502;
     default:
       return 500;

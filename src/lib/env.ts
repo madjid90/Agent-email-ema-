@@ -50,6 +50,14 @@ const envSchema = z.object({
   EMAIL_SYNC_LIMIT: z.coerce.number().int().min(1).max(500).default(50),
   EMAIL_INITIAL_SYNC_DAYS: z.coerce.number().int().min(0).max(365).default(7),
   ATTACHMENT_MAX_MB: z.coerce.number().min(0.1).max(150).default(15),
+  /** Pièces jointes SORTANTES : encodées en base64 dans la requête Graph (pas d'upload session). */
+  OUTGOING_ATTACHMENT_MAX_MB: z.coerce.number().min(0.1).max(25).default(3),
+  /** Extraction PDF : au-delà, le worker d'extraction est arrêté. */
+  PDF_EXTRACTION_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(120).default(20),
+  /** Chiffrement des sauvegardes (scripts/backup.sh) : AES-256-GCM, clé dérivée par scrypt. */
+  BACKUP_ENCRYPTION_PASSWORD: z.string().min(12, "12 caractères minimum").optional(),
+  /** `true` uniquement si Nginx réécrit X-Forwarded-For (sinon l'en-tête n'est pas fiable). */
+  TRUST_PROXY_HEADER: optionalBool(false),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 

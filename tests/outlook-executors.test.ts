@@ -5,12 +5,17 @@ import { saveTokenSet } from "@/integrations/microsoft/token-store";
 import { createOutlookExecutors } from "@/actions/executors/outlook";
 import { approveAndExecute, clearExecutors, proposeAction, registerExecutor } from "@/actions/engine";
 import * as emails from "@/database/repositories/emails";
-import { settingsSchema } from "@/lib/config";
+import { settingsSchema, type Contact } from "@/lib/config";
 import { fakeFetch, json, message, noSleep } from "./helpers/fake-graph";
 
 describe("Exécuteurs Outlook (après validation uniquement)", () => {
   let db: Db;
   const settings = settingsSchema.parse({ company: { name: "X", userName: "U", email: "u@x.fr" } });
+  // Destinataires autorisés : contacts configurés (phase 8A — plus d'adresse libre).
+  const contacts: Contact[] = [
+    { id: "magali", name: "Magali", email: "magali@exemple.fr", role: "Travaux", internal: true },
+    { id: "compta", name: "Compta", email: "compta@x.fr", role: "Comptabilité", internal: true },
+  ];
 
   beforeEach(() => {
     db = openIsolatedDb();
@@ -25,7 +30,7 @@ describe("Exécuteurs Outlook (après validation uniquement)", () => {
       { match: /POST .*\/messages\/g1\/reply$/, handle: () => new Response(null, { status: 202 }) },
       { match: /GET .*\/sentitems\/messages\?/, handle: () => json({ value: [message({ id: "sent-1", conversationId: "conv", from: { emailAddress: { address: "moi@entreprise.fr" } }, sentDateTime: new Date().toISOString(), subject: "RE: Devis" })] }) },
     ]);
-    for (const ex of createOutlookExecutors({ db, client: new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep }) })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep }), contacts, settings })) registerExecutor(ex);
 
     const a = proposeAction({ type: "reply_email", title: "Répondre", payload: { email_id: e.id, body: "Bonjour, bien reçu." }, sourceEmailId: e.id }, { db, settings });
     expect(a.status).toBe("WAITING_APPROVAL");
@@ -47,7 +52,7 @@ describe("Exécuteurs Outlook (après validation uniquement)", () => {
       { match: /POST .*\/me\/sendMail$/, handle: () => new Response(null, { status: 202 }) },
       { match: /GET .*\/sentitems/, handle: () => json({ value: [] }) },
     ]);
-    for (const ex of createOutlookExecutors({ db, client: new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep }) })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep }), contacts, settings })) registerExecutor(ex);
 
     const f = proposeAction({ type: "forward_email", title: "Transférer", payload: { email_id: e.id, to: ["magali@exemple.fr"], comment: "Pour traitement" }, sourceEmailId: e.id }, { db, settings });
     expect((await approveAndExecute(f.id, "user", { db, settings })).status).toBe("COMPLETED");
@@ -62,10 +67,32 @@ describe("Exécuteurs Outlook (après validation uniquement)", () => {
     expect(mail.saveToSentItems).toBe(true);
   });
 
+  it("destinataire hors politique : envoi refusé même si le payload le contient", async () => {
+    const e = emails.insertEmail({ graphId: "g9", threadId: "conv9", senderEmail: "client@ext.fr", subject: "Facture", receivedAt: "2026-09-15T10:00:00.000Z" }, db);
+    const { fetchImpl, calls } = fakeFetch([
+      { match: /POST .*\/forward$/, handle: () => new Response(null, { status: 202 }) },
+      { match: /POST .*\/me\/sendMail$/, handle: () => new Response(null, { status: 202 }) },
+    ]);
+    for (const ex of createOutlookExecutors({ db, client: new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep }), contacts, settings })) registerExecutor(ex);
+
+    const f = proposeAction({ type: "forward_email", title: "Transférer", payload: { email_id: e.id, to: ["inconnu@pirate.fr"], comment: "" }, sourceEmailId: e.id }, { db, settings });
+    const forwarded = await approveAndExecute(f.id, "user", { db, settings });
+    expect(forwarded.status).toBe("FAILED");
+    expect(forwarded.error).toContain("Destinataire non autorisé");
+
+    const s2 = proposeAction({ type: "send_email", title: "Envoyer", payload: { to: ["inconnu@pirate.fr"], subject: "x", body: "y", thread_id: null } }, { db, settings });
+    expect((await approveAndExecute(s2.id, "user", { db, settings })).status).toBe("FAILED");
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+    // L'expéditeur réel du thread reste un destinataire légitime.
+    const ok = proposeAction({ type: "forward_email", title: "Transférer", payload: { email_id: e.id, to: ["client@ext.fr"], comment: "" }, sourceEmailId: e.id }, { db, settings });
+    expect((await approveAndExecute(ok.id, "user", { db, settings })).status).toBe("COMPLETED");
+  });
+
   it("échec Graph à l'envoi → action FAILED, sans double envoi possible", async () => {
     const e = emails.insertEmail({ graphId: "g3", threadId: "c", subject: "x", receivedAt: "2026-09-15T10:00:00.000Z" }, db);
     const { fetchImpl, calls } = fakeFetch([{ match: /POST .*\/reply$/, handle: () => json({ error: { code: "ErrorSendAsDenied" } }, 403) }]);
-    for (const ex of createOutlookExecutors({ db, client: new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep }) })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: new GraphClient({ getAccessToken: async () => "t", fetchImpl, sleep: noSleep }), contacts, settings })) registerExecutor(ex);
     const a = proposeAction({ type: "reply_email", title: "Répondre", payload: { email_id: e.id, body: "x" }, sourceEmailId: e.id }, { db, settings });
     const r = await approveAndExecute(a.id, "user", { db, settings });
     expect(r.status).toBe("FAILED");

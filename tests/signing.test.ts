@@ -345,7 +345,11 @@ describe("Exécution de la signature (Action Engine + WhatsApp + Graph mockés)"
     clearExecutors();
     const good = graphOk();
     registerExecutor(createSigningExecutor({ db, client: good.client, settings, companies }));
-    const retried = await retryAction(s.actionId, "user", { db, settings });
+    // Phase 8A : un échec 503 sur un envoi est « ambigu » — EMA vérifie d'abord
+    // les éléments envoyés (vides ici) avant d'autoriser un nouvel essai.
+    expect(actions.getAction(s.actionId, db)?.error_code).toBe("DELIVERY_AMBIGUOUS");
+    // Réconciliation : aucun envoi trouvé dans les éléments envoyés → nouvel essai autorisé.
+    const retried = await retryAction(s.actionId, "user", { db, settings, reconcile: async () => ({ verdict: "not_sent", detail: "aucun envoi correspondant" }) });
     expect(retried.status).toBe("COMPLETED");
     expect(documents.listDocuments({ category: "signed" }, db)).toHaveLength(1);
     expect(documents.getDocument(s.documentId, db)?.signed_document_id).toBe(signedId);

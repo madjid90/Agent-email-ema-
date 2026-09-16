@@ -98,6 +98,7 @@ export default function ApprovalsPage() {
           draft={draft}
           editable={DRAFT_TYPES.has(a.type)}
           actionError={a.error}
+          ambiguous={a.error_code === "DELIVERY_AMBIGUOUS"}
           documentId={a.document_id}
           whatsappConfigured={whatsapp}
         />

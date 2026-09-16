@@ -19,8 +19,13 @@ export interface TaskRunResult {
   error?: string;
 }
 
-/** Exécute une tâche sous verrou SQLite (une seule exécution à la fois, tous process confondus). */
-export async function runTaskOnce(task: WorkerTask, owner: string = newId("wrk")): Promise<TaskRunResult> {
+/**
+ * Exécute une tâche sous verrou SQLite. L'owner est unique PAR EXÉCUTION :
+ * si le tick précédent tourne encore, le suivant n'obtient pas le verrou et ne
+ * démarre pas — même process, même tâche, même machine.
+ */
+export async function runTaskOnce(task: WorkerTask, workerId: string = newId("wrk")): Promise<TaskRunResult> {
+  const owner = `${workerId}:${task.name}:${newId("run")}`;
   if (!acquireLock(`task:${task.name}`, owner, task.lockTtlSeconds)) {
     return { name: task.name, ran: false };
   }
@@ -42,9 +47,9 @@ export interface SchedulerHandle {
 
 /** Boucle simple : chaque tâche a son propre setInterval, sans chevauchement grâce au verrou. */
 export function startScheduler(tasks: WorkerTask[]): SchedulerHandle {
-  const owner = newId("wrk");
+  const workerId = newId("wrk");
   const timers = tasks.map((task) => {
-    const tick = () => void runTaskOnce(task, owner);
+    const tick = () => void runTaskOnce(task, workerId);
     setTimeout(tick, 1000);
     return setInterval(tick, task.intervalSeconds * 1000);
   });

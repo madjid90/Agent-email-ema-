@@ -65,11 +65,13 @@ export function listActionsForEmail(emailId: string, db: Db = getDb()): ActionRo
  * statuts attendus. Retourne true si exactement une ligne a changé.
  * C'est la brique d'idempotence de l'Action Engine.
  */
+export type ActionPatchFields = "approved_at" | "executed_at" | "completed_at" | "error" | "error_code" | "result";
+
 export function transitionAction(
   id: string,
   from: ActionStatus | ActionStatus[],
   to: ActionStatus,
-  extra: Partial<Pick<ActionRow, "approved_at" | "executed_at" | "completed_at" | "error" | "result">> = {},
+  extra: Partial<Pick<ActionRow, ActionPatchFields>> = {},
   db: Db = getDb(),
 ): boolean {
   const froms = Array.isArray(from) ? from : [from];
@@ -88,6 +90,14 @@ export function transitionAction(
 
 export function updateActionPayload(id: string, payload: unknown, db: Db = getDb()): void {
   db.prepare("UPDATE actions SET payload = ? WHERE id = ?").run(JSON.stringify(payload ?? {}), id);
+}
+
+/** Actions interrompues : validées ou en cours d'exécution depuis trop longtemps. */
+export function listStaleActions(status: ActionStatus, olderThanIso: string, db: Db = getDb()): ActionRow[] {
+  const column = status === "APPROVED" ? "approved_at" : "executed_at";
+  return db
+    .prepare(`SELECT * FROM actions WHERE status = ? AND COALESCE(${column}, created_at) <= ? ORDER BY created_at ASC LIMIT 20`)
+    .all(status, olderThanIso) as ActionRow[];
 }
 
 export function countActions(opts: { status?: ActionStatus | ActionStatus[]; since?: string } = {}, db: Db = getDb()): number {

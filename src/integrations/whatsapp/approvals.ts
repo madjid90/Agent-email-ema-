@@ -8,7 +8,7 @@ import { getDocument } from "@/database/repositories/documents";
 import { formatAmount, formatDateTime } from "@/lib/time";
 import { getFollowup } from "@/database/repositories/followups";
 import { logHistory } from "@/database/repositories/history";
-import { claimWebhookEvent, setWebhookEventResult } from "@/database/repositories/webhook-events";
+import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "@/database/repositories/webhook-events";
 import type { ActionRow, ApprovalRow } from "@/database/types";
 import { parseJson } from "@/database/types";
 import { getApproverPhone } from "@/lib/env";
@@ -205,11 +205,15 @@ export async function handleInboundEvent(event: WhatsappInboundEvent, deps: Appr
     log.warn("whatsapp event from unauthorized number", { from: maskPhone(event.from) });
     return { handled: false, outcome: "unauthorized", actionId: null, message: "Numéro non autorisé" };
   }
-  if (!claimWebhookEvent({ provider: "whatsapp", externalId: event.messageId, eventType: event.kind, sender: maskPhone(event.from) }, db)) {
-    return { handled: false, outcome: "duplicate", actionId: null, message: "Événement déjà traité" };
+  // Claim atomique : reprise possible si un crash a laissé l'événement en cours.
+  // Les décisions sont idempotentes (Action Engine), une reprise est donc sûre.
+  const claim = claimWebhookEvent({ provider: "whatsapp", externalId: event.messageId, eventType: event.kind, sender: maskPhone(event.from) }, db);
+  if (!claim.claimed) {
+    return { handled: false, outcome: "duplicate", actionId: null, message: claim.reason === "already_processed" ? "Événement déjà traité" : "Événement en cours de traitement" };
   }
+  if (claim.resumed) log.warn("resuming interrupted approval event", { attempts: claim.event.attempts });
   const finish = (r: DecisionResult): DecisionResult => {
-    setWebhookEventResult("whatsapp", event.messageId, r.outcome, db);
+    completeWebhookEvent("whatsapp", event.messageId, r.outcome, db);
     return r;
   };
   const button = parseButtonId(event.buttonId);
@@ -252,8 +256,11 @@ export async function handleInboundEvent(event: WhatsappInboundEvent, deps: Appr
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erreur";
     // CONFLICT = déjà exécutée (double clic, validation UI simultanée) : rien à refaire.
-    await reply(deps, approver, err instanceof EmaError && err.code === "CONFLICT" ? "ℹ Cette action a déjà été traitée." : `⚠ ${message}`);
-    return finish({ handled: false, outcome: "already_decided", actionId: approval.action_id, message });
+    const alreadyDone = err instanceof EmaError && err.code === "CONFLICT";
+    await reply(deps, approver, alreadyDone ? "ℹ Cette action a déjà été traitée." : `⚠ ${message}`);
+    if (alreadyDone) return finish({ handled: false, outcome: "already_decided", actionId: approval.action_id, message });
+    failWebhookEvent("whatsapp", event.messageId, message, db);
+    return { handled: false, outcome: "failed", actionId: approval.action_id, message };
   }
 }
 

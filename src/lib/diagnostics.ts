@@ -211,6 +211,14 @@ export function runChecks(version: string, now: Date = new Date(), db?: Db): Hea
     detail: integrations.whatsapp ? `configuré${env.WHATSAPP_APP_SECRET ? ", signature des webhooks vérifiée" : ", SANS vérification de signature"}` : "non configuré (validations depuis l'interface uniquement)",
   });
 
+  // Sauvegardes : chiffrées ou non (le mot de passe lui-même n'est jamais affiché)
+  const backupEncrypted = Boolean(env.BACKUP_ENCRYPTION_PASSWORD);
+  checks.push({
+    name: "sauvegardes",
+    level: backupEncrypted ? "PASS" : env.NODE_ENV === "production" ? "FAIL" : "WARN",
+    detail: backupEncrypted ? "chiffrement AES-256-GCM configuré" : "BACKUP_ENCRYPTION_PASSWORD absent : sauvegardes en clair (refusées en production)",
+  });
+
   // Sociétés et assets de signature
   const companies = getCompanies();
   const withSignature = companies.filter((c) => assetStatus(c, "signature").available).length;

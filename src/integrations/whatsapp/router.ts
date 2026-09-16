@@ -4,7 +4,7 @@ import * as actionsRepo from "@/database/repositories/actions";
 import * as approvalsRepo from "@/database/repositories/approvals";
 import * as chatRepo from "@/database/repositories/chat";
 import { logHistory } from "@/database/repositories/history";
-import { claimWebhookEvent, setWebhookEventResult } from "@/database/repositories/webhook-events";
+import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "@/database/repositories/webhook-events";
 import type { ActionRow } from "@/database/types";
 import { getApproverPhone, getEnv } from "@/lib/env";
 import { getSettings, type Settings } from "@/lib/config";
@@ -162,9 +162,8 @@ export async function handleWhatsappEvent(event: WhatsappInboundEvent, deps: Rou
   if (route === "REMINDER_INTERACTION") {
     const button = parseReminderButtonId(event.buttonId);
     if (!button) return { route, outcome: "ignored", actionIds: [], reply: null };
-    if (!claimWebhookEvent({ provider: "whatsapp", externalId: event.messageId, eventType: "reminder", sender: maskPhone(event.from) }, db)) {
-      return { route, outcome: "duplicate", actionIds: [], reply: null };
-    }
+    const reminderClaim = claimWebhookEvent({ provider: "whatsapp", externalId: event.messageId, eventType: "reminder", sender: maskPhone(event.from) }, db);
+    if (!reminderClaim.claimed) return { route, outcome: "duplicate", actionIds: [], reply: null };
     const followup = getFollowup(button.followupId, db);
     if (!followup) {
       await send(deps, approver, "⚠️ Rappel introuvable.");
@@ -174,16 +173,16 @@ export async function handleWhatsappEvent(event: WhatsappInboundEvent, deps: Rou
       if (button.decision === "done") {
         completeReminder(button.followupId, { db, settings, actor: "whatsapp" });
         await send(deps, approver, `✅ Rappel terminé : ${followup.title ?? followup.reason}`);
-        setWebhookEventResult("whatsapp", event.messageId, "reminder_done", db);
+        completeWebhookEvent("whatsapp", event.messageId, "reminder_done", db);
         return { route, outcome: "reminder_done", actionIds: [], reply: null };
       }
       const updated = postponeFollowup(button.followupId, { in_days: 1 }, { db, settings, actor: "whatsapp" });
       await send(deps, approver, `⏭ Rappel reporté au ${formatDateTime(updated.execute_at, settings.company.timezone)}.`);
-      setWebhookEventResult("whatsapp", event.messageId, "reminder_snoozed", db);
+      completeWebhookEvent("whatsapp", event.messageId, "reminder_snoozed", db);
       return { route, outcome: "reminder_snoozed", actionIds: [], reply: null };
     } catch (err) {
       await send(deps, approver, `⚠️ ${err instanceof Error ? err.message : "Erreur"}`);
-      setWebhookEventResult("whatsapp", event.messageId, "error", db);
+      failWebhookEvent("whatsapp", event.messageId, err instanceof Error ? err.message : "Erreur", db);
       return { route, outcome: "already_decided", actionIds: [], reply: null };
     }
   }
@@ -195,15 +194,25 @@ export async function handleWhatsappEvent(event: WhatsappInboundEvent, deps: Rou
     return { route: "IGNORED", outcome: "assistant_disabled", actionIds: [], reply: null };
   }
 
-  // 2. Dédoublonnage Meta : un message traité une fois ne rappelle jamais Claude.
-  if (!claimWebhookEvent({ provider: "whatsapp", externalId: event.messageId, eventType: "text", sender: maskPhone(event.from) }, db)) {
-    return { route, outcome: "duplicate", actionIds: [], reply: null };
-  }
+  // 2. Dédoublonnage Meta et cycle de traitement : un message traité une fois ne
+  // rappelle jamais Claude ; un message interrompu est repris de façon contrôlée.
+  const claim = claimWebhookEvent({ provider: "whatsapp", externalId: event.messageId, eventType: "text", sender: maskPhone(event.from) }, db);
+  if (!claim.claimed) return { route, outcome: "duplicate", actionIds: [], reply: null };
   const finish = (r: RouterResult): RouterResult => {
-    setWebhookEventResult("whatsapp", event.messageId, r.outcome, db);
+    completeWebhookEvent("whatsapp", event.messageId, r.outcome, db);
     return r;
   };
   const text = (event.text ?? "").trim();
+
+  // Reprise après interruption : si ce message a déjà été enregistré, il a pu
+  // créer une action avant le crash. On ne rappelle jamais Claude dessus —
+  // mieux vaut demander de renvoyer que de créer une seconde action.
+  if (claim.resumed && chatRepo.getMessageByExternalId(event.messageId, db)) {
+    const notice = "Une interruption a eu lieu pendant le traitement de cette demande. Merci de la renvoyer.";
+    logHistory({ eventType: "whatsapp.interrupted", message: `Traitement interrompu pour un message déjà enregistré (tentative ${claim.event.attempts}) : reprise refusée`, actor: "system" }, db);
+    await send(deps, approver, notice);
+    return finish({ route, outcome: "interrupted", actionIds: [], reply: notice });
+  }
   logHistory({ eventType: "whatsapp.message_received", message: `Message WhatsApp reçu (${maskPhone(event.from)}) : ${text.slice(0, 160)}`, actor: "user" }, db);
 
   // 3. Décision en langage naturel — uniquement si une action attend réellement une validation.
@@ -243,6 +252,8 @@ export async function handleWhatsappEvent(event: WhatsappInboundEvent, deps: Rou
     log.warn("whatsapp assistant failed", { message });
     logHistory({ eventType: "whatsapp.assistant_failed", message: `Assistant WhatsApp indisponible : ${message}`, actor: "system" }, db);
     await send(deps, approver, NO_LLM_REPLY);
-    return finish({ route, outcome: "llm_error", actionIds: [], reply: NO_LLM_REPLY });
+    // L'assistant n'a rien produit : l'événement reste reprenable si Meta le rejoue.
+    failWebhookEvent("whatsapp", event.messageId, message, db);
+    return { route, outcome: "llm_error", actionIds: [], reply: NO_LLM_REPLY };
   }
 }

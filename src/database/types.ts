@@ -101,6 +101,8 @@ export interface ActionRow {
   executed_at: string | null;
   completed_at: string | null;
   error: string | null;
+  /** Code stable du dernier échec (`DELIVERY_AMBIGUOUS` interdit tout renvoi automatique). */
+  error_code: string | null;
   result: string | null; // JSON
 }
 
@@ -125,6 +127,9 @@ export interface ApprovalRow {
   last_notify_error: string | null;
 }
 
+/** Cycle de traitement d'un événement entrant (phase 8A). */
+export type WebhookStatus = "RECEIVED" | "PROCESSING" | "PROCESSED" | "FAILED";
+
 export interface WebhookEventRow {
   id: string;
   provider: string;
@@ -133,6 +138,12 @@ export interface WebhookEventRow {
   sender: string | null;
   received_at: string;
   result: string | null;
+  status: WebhookStatus;
+  attempts: number;
+  started_at: string | null;
+  processed_at: string | null;
+  locked_until: string | null;
+  last_error: string | null;
 }
 
 /**

@@ -58,7 +58,13 @@ describe("SQLite", () => {
   it("verrous : un seul propriétaire à la fois, expiration", () => {
     expect(locks.acquireLock("scan", "w1", 60, db)).toBe(true);
     expect(locks.acquireLock("scan", "w2", 60, db)).toBe(false);
-    expect(locks.acquireLock("scan", "w1", 60, db)).toBe(true); // ré-entrant pour le même owner
+    // Phase 8A : plus de ré-entrance, même pour le propriétaire (un tick ne peut
+    // pas relancer une exécution encore en cours).
+    expect(locks.acquireLock("scan", "w1", 60, db)).toBe(false);
+    expect(locks.renewLock("scan", "w1", 120, db)).toBe(true);
+    expect(locks.renewLock("scan", "w2", 120, db)).toBe(false);
+    locks.releaseLock("scan", "w2", db); // pas le propriétaire : sans effet
+    expect(locks.currentLock("scan", db)?.owner).toBe("w1");
     locks.releaseLock("scan", "w1", db);
     expect(locks.acquireLock("scan", "w2", 60, db)).toBe(true);
     db.prepare("UPDATE worker_locks SET locked_until = '2000-01-01T00:00:00.000Z'").run();

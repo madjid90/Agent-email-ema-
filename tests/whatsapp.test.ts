@@ -168,7 +168,7 @@ describe("Validation WhatsApp de bout en bout", () => {
   it("VALIDER : approval APPROVED, action exécutée via Graph dans le thread, COMPLETED, confirmation, historique", async () => {
     const { action, email } = seed(db);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     await notifyPendingApproval(action.id, { db, client: wa.client, approverPhone: APPROVER, settings });
     const apr = approvals.getPendingApprovalForAction(action.id, db)!;
@@ -191,7 +191,7 @@ describe("Validation WhatsApp de bout en bout", () => {
   it("REFUSER : approval et action REJECTED, aucun appel Graph", async () => {
     const { action } = seed(db);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const apr = approvals.getPendingApprovalForAction(action.id, db)!;
     const [event] = parseWebhook(buttonWebhook(APPROVER, `reject:${apr.id}`));
@@ -218,7 +218,7 @@ describe("Validation WhatsApp de bout en bout", () => {
   it("approval inexistante ou expirée : rien n'est exécuté", async () => {
     const { action } = seed(db);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const unknown = await handleInboundEvent(parseWebhook(buttonWebhook(APPROVER, "approve:apr_000000000000"))[0]!, { db, client: wa.client, approverPhone: APPROVER, settings });
     expect(unknown.outcome).toBe("unknown");
@@ -249,7 +249,7 @@ describe("Validation WhatsApp de bout en bout", () => {
   it("double clic et rejeu du webhook : une seule exécution", async () => {
     const { action } = seed(db);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const apr = approvals.getPendingApprovalForAction(action.id, db)!;
     const first = buttonWebhook(APPROVER, `approve:${apr.id}`, "wamid.same");
@@ -265,7 +265,7 @@ describe("Validation WhatsApp de bout en bout", () => {
   it("validation simultanée interface + WhatsApp : une seule exécution", async () => {
     const { action } = seed(db);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const apr = approvals.getPendingApprovalForAction(action.id, db)!;
     const results = await Promise.allSettled([
@@ -281,7 +281,7 @@ describe("Validation WhatsApp de bout en bout", () => {
   it("Graph échoue après validation : action FAILED, jamais considérée envoyée, réessai possible", async () => {
     const { action, email } = seed(db);
     const bad = graphFailing();
-    for (const ex of createOutlookExecutors({ db, client: bad.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: bad.client, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     const apr = approvals.getPendingApprovalForAction(action.id, db)!;
     const r = await handleInboundEvent(parseWebhook(buttonWebhook(APPROVER, `approve:${apr.id}`))[0]!, { db, client: wa.client, approverPhone: APPROVER, settings });
@@ -291,7 +291,7 @@ describe("Validation WhatsApp de bout en bout", () => {
     expect(wa.sent().at(-1)?.type === "text" && (wa.sent().at(-1) as { text: { body: string } }).text.body.startsWith("⚠")).toBe(true);
     clearExecutors();
     const good = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: good.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: good.client, settings })) registerExecutor(ex);
     const retried = await retryAction(action.id, "user", { db, settings });
     expect(retried.status).toBe("COMPLETED");
     await expect(retryAction(action.id, "user", { db, settings })).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
@@ -300,7 +300,7 @@ describe("Validation WhatsApp de bout en bout", () => {
   it("brouillon modifié manuellement : payload définitif, approval mise à jour, historique, envoi du texte modifié", async () => {
     const { action } = seed(db);
     const g = graphOk();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, settings })) registerExecutor(ex);
     const edited = editActionPayload(action.id, { body: "Bonjour Jean,\nLe règlement sera effectué vendredi.\nCordialement" }, "user", { db, settings });
     expect(JSON.parse(edited.payload).body).toContain("vendredi");
     expect(approvals.getPendingApprovalForAction(action.id, db)?.proposed_reply).toContain("vendredi");

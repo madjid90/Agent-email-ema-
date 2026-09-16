@@ -2,6 +2,35 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [1.0.1] — Phase 8A — Durcissement production — 2026-09-16
+
+Aucune nouvelle fonctionnalité métier. Architecture des phases 0 à 8 inchangée.
+
+### Sécurité
+- **XSS documents** : un document archivé n'est plus jamais rendu dans l'origine EMA. Seul un PDF authentique (MIME **et** extension) est affiché en ligne ; HTML, SVG, XHTML, XML, `.eml`, `.swf`, `.wasm`… sont forcés en `application/octet-stream` + `Content-Disposition: attachment`, avec `nosniff`, CSP `default-src 'none'; object-src 'none'; frame-ancestors 'none'; sandbox`, `X-Frame-Options: DENY` et `Cache-Control: private, no-store` (`src/lib/content-safety.ts`). Un HTML piégé reçu en pièce jointe ne peut plus voler la session ni appeler les API authentifiées.
+- **Sauvegardes chiffrées** : `BACKUP_ENCRYPTION_PASSWORD` active un chiffrement AES-256-GCM (clé dérivée par scrypt, `scripts/backup-crypto.cjs`, module `crypto` uniquement). L'archive en clair est effacée (`shred` si disponible), l'archive `.enc` est en `600`. En production, une sauvegarde non chiffrée est **refusée** sauf `--allow-plaintext`. La restauration déchiffre dans un dossier temporaire nettoyé, et s'arrête avant toute écriture si le mot de passe est incorrect ou l'archive altérée. Le mot de passe n'apparaît dans aucun journal ni message d'erreur.
+- **Connexion** : limitation ramenée à 5 tentatives par 15 minutes avec blocage de 15 minutes, **persistée en SQLite** (table `rate_limits`) donc résistante à un redémarrage. `X-Forwarded-For` n'est plus lu par défaut (en-tête falsifiable) : uniquement si `TRUST_PROXY_HEADER=true`. Aucun mot de passe, aucune empreinte n'est stocké.
+- **Pièces jointes sortantes** : `OUTGOING_ATTACHMENT_MAX_MB` (3 Mo par défaut) vérifié **avant** l'appel à Graph, avec demande d'envoi manuel — pas d'upload session, toujours aucune permission `Mail.ReadWrite`.
+
+### Fiabilité
+- **Envois non rejoués à l'aveugle** : `GraphClient` distingue requêtes idempotentes et envois. Une coupure réseau ou un 5xx pendant un `POST` d'envoi lève `DeliveryAmbiguousError` (`DELIVERY_AMBIGUOUS`, HTTP 502) au lieu d'être rejoué ; seuls un 401 (requête rejetée avant traitement, rejouée après rafraîchissement du token) et un 429 le sont.
+- **Réconciliation Outlook** (`src/integrations/microsoft/reconcile.ts`) : avant toute nouvelle tentative, EMA cherche l'envoi réel dans les éléments envoyés. Correspondance forte seulement (même conversation, ou objet **et** destinataire) ; toute lecture Graph impossible donne `unknown`, jamais « non envoyé ». `sent` → action terminée sans renvoi, `unknown` → échec explicite et vérification humaine (bouton « J'ai vérifié, renvoyer » dans l'interface).
+- **Reprise après interruption** (`src/actions/recovery.ts`, tâche worker toutes les 60 s) : une action `APPROVED` jamais exécutée repart ; une action `EXECUTING` interrompue est réconciliée, jamais rejouée ; un devis dont la copie signée existe n'est **jamais re-signé**.
+- **Verrous worker** : un verrou actif n'est plus repris au motif que l'`owner` est identique ; chaque exécution a un propriétaire unique (`worker:tâche:run`). Ajout de `renewLock`, `releaseLock`, `currentLock`.
+- **Événements entrants** : machine à états `RECEIVED → PROCESSING → PROCESSED | FAILED` avec verrou de 120 s et claim atomique (`claimWebhookEvent`). Un crash ne « perd » plus l'événement comme doublon ; un message texte interrompu déjà enregistré n'est jamais renvoyé à Claude — EMA demande de le renvoyer plutôt que de créer une seconde action.
+- **Destinataires déterministes** : les tools WhatsApp exposent `prepare_send_email` / `prepare_forward_email` avec un `contact_id` (plus d'adresse libre) ; `validateOutboundRecipients()` revérifie chaque adresse juste avant l'envoi dans tous les exécuteurs (contact configuré, destinataire de règle, participant réel du thread, boîte du client).
+- **Extraction PDF** : exécutée dans un *worker thread* réellement terminé au-delà de `PDF_EXTRACTION_TIMEOUT_SECONDS` (20 s) — un PDF pathologique ne monopolise plus le process.
+
+### Ajouté
+- Migration `009_hardening` : `actions.error_code`, cycle de vie des `webhook_events` (`status`, `attempts`, `started_at`, `processed_at`, `locked_until`, `last_error`), table `rate_limits`.
+- Variables d'environnement `OUTGOING_ATTACHMENT_MAX_MB`, `PDF_EXTRACTION_TIMEOUT_SECONDS`, `TRUST_PROXY_HEADER`, `BACKUP_ENCRYPTION_PASSWORD` (documentées dans `.env.example`) ; contrôle « sauvegardes » dans `npm run doctor` (FAIL en production sans chiffrement).
+- Intégration continue `.github/workflows/ci.yml` : Node 22, `npm ci`, `npm run check`, `npm audit --omit=dev --audit-level=high` (échec uniquement sur une vulnérabilité haute ou critique en runtime).
+- 45 nouveaux tests de durcissement (`tests/hardening.test.ts`, 289 au total) : restitution des documents, refus non authentifié, idempotence Graph, réconciliation, verrous, cycle des webhooks, message interrompu, destinataires, reprise, limitation de connexion, sauvegarde chiffrée de bout en bout, délai d'extraction PDF, pièce jointe trop volumineuse. Aucun envoi réel, aucune donnée client, aucun secret réel.
+
+### Documentation
+- `SECURITY.md` (§9 sauvegardes chiffrées, §9 ter durcissement, checklist), `ARCHITECTURE.md` (§10 bis), `docs/deployment.md` (chiffrement, restauration, CI, blocage de livraison), `ROADMAP.md`.
+- ⛔ **Blocage de livraison documenté** : le dépôt GitHub public doit être passé en privé **manuellement** avant tout déploiement commercial ; aucun code ne modifie la visibilité du dépôt.
+
 ## [1.0.0] — Phase 8 — Production ready (EMA V1) — 2026-09-16
 
 Périmètre fonctionnel V1 gelé : aucune nouvelle fonctionnalité métier, hors l'import de signature/tampon depuis l'interface (finition attendue de la phase 5).

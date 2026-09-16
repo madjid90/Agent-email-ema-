@@ -10,6 +10,7 @@ import { EmaError } from "@/lib/errors";
 import { newId } from "@/lib/ids";
 import { createLogger } from "@/lib/logger";
 import { ensureDir, privatePath, sanitizeFilename } from "@/lib/paths";
+import { isActiveContent } from "@/lib/content-safety";
 import type { GraphClient } from "./graph-client";
 import type { GraphAttachment } from "./types";
 
@@ -36,6 +37,15 @@ export function isDangerousAttachment(name: string, contentType: string): boolea
   // Double extension (facture.pdf.exe) : la dernière fait foi, mais on refuse aussi toute extension dangereuse intermédiaire.
   if (parts.length > 1 && parts.slice(1).some((ext) => DANGEROUS_EXTENSIONS.has(ext))) return true;
   return DANGEROUS_MIME.test(contentType);
+}
+
+/**
+ * Pièce jointe au contenu actif (HTML, SVG, XML…) : elle est archivée — elle peut
+ * servir de preuve — mais jamais affichée dans l'origine EMA (voir
+ * `src/lib/content-safety.ts`) et jamais analysée comme un document.
+ */
+export function isActiveAttachment(name: string, contentType: string): boolean {
+  return isActiveContent(name, contentType);
 }
 
 export function toMeta(a: GraphAttachment): AttachmentMeta {

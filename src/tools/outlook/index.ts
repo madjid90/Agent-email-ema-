@@ -8,6 +8,7 @@ import { parseJson } from "@/database/types";
 import { EmaError } from "@/lib/errors";
 import { getEnv } from "@/lib/env";
 import { proposeAction } from "@/actions/engine";
+import { resolveContactId, validateOutboundRecipients } from "@/agent/recipients";
 import { createConnectedGraphClient, isOutlookConnected, type GraphClient } from "@/integrations/microsoft/graph-client";
 import { searchMessages } from "@/integrations/microsoft/mail";
 import { fetchAttachmentDocument, listAttachments } from "@/integrations/microsoft/attachments";
@@ -159,11 +160,16 @@ export const replyEmail = defineTool({
   },
 });
 
+/**
+ * Transfert par adresse : INTERNE (phase 8A). Le modèle passe par
+ * `prepare_forward_email` (contact_id) ou `prepare_document_forward` (règles),
+ * qui résolvent l'adresse côté serveur.
+ */
 export const forwardEmail = defineTool({
   name: "forward_email",
-  description: "Propose de transférer l'email à un ou plusieurs destinataires (issus des règles/contacts). Crée une action à valider.",
+  description: "Transfère un email à des adresses déjà résolues par le serveur (règles, contacts). Usage interne.",
   riskLevel: "MEDIUM",
-  modes: ["analyze", "chat"],
+  modes: ["internal"],
   input: z.object({ email_id: z.string(), to: z.array(z.string().email()).min(1), comment: z.string().default("") }),
   output: actionRefSchema,
   handler: async (input, ctx) => {
@@ -174,11 +180,12 @@ export const forwardEmail = defineTool({
   },
 });
 
+/** Envoi par adresse : INTERNE (phase 8A). Le modèle passe par `prepare_send_email`. */
 export const sendEmail = defineTool({
   name: "send_email",
-  description: "Propose l'envoi d'un nouvel email. Crée une action à valider.",
+  description: "Envoie un nouvel email à des adresses déjà résolues par le serveur. Usage interne.",
   riskLevel: "MEDIUM",
-  modes: ["chat"],
+  modes: ["internal"],
   input: z.object({ to: z.array(z.string().email()).min(1), subject: z.string().min(1), body: z.string().min(1), attachments: z.array(z.string()).default([]) }),
   output: actionRefSchema,
   handler: async (input, ctx) => {
@@ -187,4 +194,48 @@ export const sendEmail = defineTool({
   },
 });
 
-export const outlookTools = [getNewEmails, getEmail, getEmailThread, searchEmails, getAttachment, replyEmail, forwardEmail, sendEmail];
+/**
+ * Envoi d'un nouvel email à un contact CONFIGURÉ (phase 8A) : le modèle désigne
+ * un `contact_id`, jamais une adresse. Le serveur résout l'adresse depuis
+ * `config/contacts.json` ou les correspondants réels de la boîte.
+ */
+export const prepareSendEmail = defineTool({
+  name: "prepare_send_email",
+  description: "Prépare l'envoi d'un nouvel email à un contact identifié par son contact_id (obtenu via search_contacts). Crée une action à valider ; n'envoie rien. N'invente jamais d'adresse.",
+  riskLevel: "MEDIUM",
+  modes: ["chat"],
+  input: z.object({ contact_id: z.string().min(1), subject: z.string().min(1).max(300), body: z.string().min(1), attachments: z.array(z.string()).default([]) }),
+  output: actionRefSchema.extend({ to: z.array(z.string()), recipient_label: z.string() }),
+  handler: async (input, ctx) => {
+    const recipient = resolveContactId(input.contact_id, { db: ctx.db, contacts: ctx.contacts, rules: ctx.rules, settings: ctx.settings });
+    validateOutboundRecipients([recipient.email], { db: ctx.db, contacts: ctx.contacts, rules: ctx.rules, settings: ctx.settings });
+    const a = proposeAction(
+      { type: "send_email", title: `Envoyer « ${input.subject} » à ${recipient.label}`, payload: { to: [recipient.email], subject: input.subject, body: input.body, attachments: input.attachments, thread_id: null } },
+      { db: ctx.db, settings: ctx.settings },
+    );
+    return { action_id: a.id, status: a.status, requires_approval: a.requires_approval === 1, to: [recipient.email], recipient_label: recipient.label };
+  },
+});
+
+/** Transfert vers un contact CONFIGURÉ (phase 8A). */
+export const prepareForwardEmail = defineTool({
+  name: "prepare_forward_email",
+  description: "Prépare le transfert d'un email à un contact identifié par son contact_id. Crée une action à valider ; le destinataire est résolu par le serveur.",
+  riskLevel: "MEDIUM",
+  modes: ["chat"],
+  input: z.object({ email_id: z.string(), contact_id: z.string().min(1), comment: z.string().default("") }),
+  output: actionRefSchema.extend({ to: z.array(z.string()), recipient_label: z.string() }),
+  handler: async (input, ctx) => {
+    const e = emailsRepo.getEmail(input.email_id, ctx.db);
+    if (!e) throw new EmaError("NOT_FOUND", `Email ${input.email_id} introuvable`);
+    const recipient = resolveContactId(input.contact_id, { db: ctx.db, contacts: ctx.contacts, rules: ctx.rules, settings: ctx.settings });
+    validateOutboundRecipients([recipient.email], { db: ctx.db, contacts: ctx.contacts, rules: ctx.rules, settings: ctx.settings, threadEmail: e });
+    const a = proposeAction(
+      { type: "forward_email", title: `Transférer « ${e.subject} » à ${recipient.label}`, payload: { email_id: e.id, to: [recipient.email], comment: input.comment }, sourceEmailId: e.id },
+      { db: ctx.db, settings: ctx.settings },
+    );
+    return { action_id: a.id, status: a.status, requires_approval: a.requires_approval === 1, to: [recipient.email], recipient_label: recipient.label };
+  },
+});
+
+export const outlookTools = [getNewEmails, getEmail, getEmailThread, searchEmails, getAttachment, replyEmail, forwardEmail, sendEmail, prepareSendEmail, prepareForwardEmail];

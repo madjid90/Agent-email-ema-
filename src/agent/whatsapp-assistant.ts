@@ -41,8 +41,8 @@ export const WHATSAPP_READ_TOOLS = [
 /** Outils de préparation : ils créent une action soumise à validation, jamais un envoi. */
 export const WHATSAPP_PREPARE_TOOLS = [
   "reply_email",
-  "forward_email",
-  "send_email",
+  "prepare_send_email",
+  "prepare_forward_email",
   "prepare_document_forward",
   "prepare_payment_request",
   "prepare_deposit_request",

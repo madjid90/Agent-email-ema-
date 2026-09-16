@@ -350,7 +350,7 @@ describe("Routage et actions financières (Action Engine + WhatsApp + Graph mock
     const analysis = analysisFixture({ category: "INVOICE", needs_reply: false, reply_draft: null });
     const out = proposeFinancialActions({ email: s.email, analysis, rules, contacts, settings, documents: [{ row: s.doc, extraction: s.extraction }] }, db);
     const g = graph();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, rules, settings })) registerExecutor(ex);
     const wa = fakeWhatsapp();
     await notifyPendingApproval(out.actionIds[0]!, { db, client: wa.client, approverPhone: APPROVER, settings });
     const apr = approvals.getPendingApprovalForAction(out.actionIds[0]!, db)!;
@@ -378,7 +378,7 @@ describe("Routage et actions financières (Action Engine + WhatsApp + Graph mock
     const analysis = analysisFixture({ category: "PAYMENT_REQUEST", needs_reply: false, reply_draft: null, amount: 100, currency: "EUR", sender: { name: "ABC", email: "compta@abc-services.fr", organization: "ABC" } });
     const out = proposeFinancialActions({ email, analysis, rules, contacts, settings, documents: [] }, db);
     const g = graph();
-    for (const ex of createOutlookExecutors({ db, client: g.client })) registerExecutor(ex);
+    for (const ex of createOutlookExecutors({ db, client: g.client, contacts, rules, settings })) registerExecutor(ex);
     const done = await approveAndExecute(out.actionIds[0]!, "user", { db, settings });
     expect(done.status).toBe("COMPLETED");
     const mail = g.calls.find((c) => c.url.endsWith("/sendMail"))!.body as { message: { toRecipients: { emailAddress: { address: string } }[]; subject: string } };
