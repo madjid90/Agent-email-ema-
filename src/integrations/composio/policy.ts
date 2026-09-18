@@ -47,6 +47,17 @@ const FORBIDDEN_DOMAIN: Record<ReadOperation, RegExp | null> = {
   get_profile: /MESSAGE|MAIL|EVENT|CALENDAR|ATTACHMENT|FOLDER/,
 };
 
+/**
+ * Scopes Microsoft Graph du POC (lecture seule). Composio Managed OAuth attend
+ * `credentials.scopes` sous forme de chaîne séparée par des VIRGULES.
+ */
+export const POC_READ_ONLY_SCOPES = ["openid", "profile", "offline_access", "User.Read", "Mail.Read", "Calendars.Read"] as const;
+
+/** Chaîne à coller dans l'auth config Composio Managed OAuth (ou `credentials.scopes` de l'API). */
+export function managedOAuthScopes(): string {
+  return POC_READ_ONLY_SCOPES.join(",");
+}
+
 /** Ensemble plat des slugs autorisés, toutes opérations confondues. */
 export const ALLOWED_SLUGS: ReadonlySet<string> = new Set(Object.values(OPERATION_TOOLS).flat());
 

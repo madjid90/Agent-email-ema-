@@ -86,9 +86,16 @@ export function resolveCallbackMode(): CallbackMode {
 
 export const LOCAL_CALLBACK_WARNING = "Mode POC local : retour OAuth par callback classique, sans vérification d'identité (session fixation possible). Le lien de connexion doit rester privé. Ce mode n'est jamais production-ready.";
 
+let clientOverride: ComposioClient | null = null;
+
+/** Client injecté pour les tests de routes (jamais utilisé en production). */
+export function setComposioClientForTests(client: ComposioClient | null): void {
+  clientOverride = client;
+}
+
 function resolve(deps: PocDeps): { db: Db; client: ComposioClient; now: Date } {
   if (!isComposioPocEnabled()) throw new EmaError("CONFIG", "POC Composio désactivé (COMPOSIO_POC_ENABLED=false)");
-  return { db: deps.db ?? getDb(), client: deps.client ?? createComposioClient(deps.fetchImpl), now: deps.now ? deps.now() : new Date() };
+  return { db: deps.db ?? getDb(), client: deps.client ?? clientOverride ?? createComposioClient(deps.fetchImpl), now: deps.now ? deps.now() : new Date() };
 }
 
 function uiStatus(row: ComposioConnectionRow | undefined): PocUiStatus {
@@ -179,35 +186,77 @@ export async function startComposioConnection(user: UserRow, callbackUrl: string
 }
 
 /**
+ * Suppression + révocation best-effort d'un compte Composio qui ne doit jamais
+ * rester actif (compte activé sans état local, ou différent de la référence).
+ * Un échec de nettoyage est journalisé sans secret ; le refus, lui, est acquis.
+ */
+async function revokeOrphanAccount(client: ComposioClient, connectedAccountId: string, reason: string, userId: string): Promise<boolean> {
+  try {
+    await client.deleteAccount(connectedAccountId);
+    log.warn("orphan composio account revoked", { userId, connectedAccountId, reason });
+    return true;
+  } catch (err) {
+    if (err instanceof ComposioError && err.httpStatus === 404) return true;
+    log.error("orphan composio account could NOT be revoked: revoke it manually in the Composio dashboard", { userId, connectedAccountId, reason, message: err instanceof Error ? err.message : String(err) });
+    return false;
+  }
+}
+
+/**
  * Callback Identity Verification : consomme le `session_uri` reçu sur le
  * verifier URL avec l'identifiant de l'utilisateur AUTHENTIFIÉ (session EMA).
- * Composio n'active la connexion que si cet utilisateur est bien celui qui a
- * démarré le parcours. Le compte activé doit en plus correspondre à la
- * référence mémorisée pour cet utilisateur.
+ *
+ * Fail-closed sur l'état local :
+ * 1. sans connexion en attente mémorisée pour cet utilisateur, le retour est
+ *    refusé AVANT tout appel à `complete_auth` — rien n'est activé, aucune
+ *    référence n'est créée ;
+ * 2. Composio n'active la connexion que si `user_id` est bien celui qui a
+ *    démarré le parcours (sinon 400 → connexion FAILED) ;
+ * 3. si le compte activé n'est pas celui référencé localement, le retour est
+ *    refusé, le compte étranger est révoqué (best-effort) et la référence
+ *    locale passe en erreur — elle n'est jamais remplacée silencieusement.
  */
 export async function completeComposioCallback(user: UserRow, sessionUri: string, deps: PocDeps = {}): Promise<PocState> {
   const { db, client } = resolve(deps);
   if (!/^https?:\/\/[^\s]+$/.test(sessionUri) || sessionUri.length > 2_000) throw new EmaError("VALIDATION", "session_uri invalide");
   const row = getComposioConnection(user.id, db);
+  if (!row) {
+    // Aucun parcours démarré par cet utilisateur dans EMA : rien à compléter, rien à activer.
+    logHistory({ eventType: "composio.identity_rejected", message: "Retour OAuth refusé : aucune connexion en attente pour ce compte (parcours non démarré depuis EMA)", actor: "system", userId: user.id }, db);
+    log.warn("composio callback without pending local connection refused", { userId: user.id });
+    throw new EmaError("FORBIDDEN", "Aucune connexion Outlook via Composio en attente pour ce compte : retour OAuth refusé. Relancez la connexion depuis la page POC.");
+  }
+  if (row.status !== "INITIATED" && row.status !== "INITIALIZING") {
+    logHistory({ eventType: "composio.identity_rejected", message: `Retour OAuth refusé : la connexion locale n'est pas en attente (${row.status})`, actor: "system", userId: user.id }, db);
+    log.warn("composio callback refused: local connection not pending", { userId: user.id, status: row.status });
+    throw new EmaError("CONFLICT", `La connexion locale n'est pas en attente (${row.status}) : relancez la connexion depuis la page POC.`);
+  }
+
+  let done: { connectedAccountId: string };
   try {
-    const done = await client.completeAuth({ sessionUri, userId: user.id });
-    if (row && row.connected_account_id !== done.connectedAccountId) {
-      log.error("complete_auth returned another account than the user's reference", { userId: user.id });
-      throw new EmaError("FORBIDDEN", "Le compte activé ne correspond pas à la connexion démarrée par cet utilisateur : connexion refusée");
-    }
-    if (!row) upsertComposioConnection({ userId: user.id, connectedAccountId: done.connectedAccountId, authConfigId: getEnv().COMPOSIO_OUTLOOK_AUTH_CONFIG_ID ?? "unknown", status: "INITIATED" }, db);
-    logHistory({ eventType: "composio.identity_verified", message: "Retour OAuth vérifié (Callback Identity Verification)", actor: "user", userId: user.id }, db);
-    log.info("composio callback identity verified", { userId: user.id, connectedAccountId: done.connectedAccountId });
+    done = await client.completeAuth({ sessionUri, userId: user.id });
   } catch (err) {
     if (err instanceof EmaError && err.code === "FORBIDDEN") {
-      if (row) updateComposioConnection(user.id, { status: "FAILED", statusReason: "Callback identity verification failed", lastError: err.message, checked: true }, db);
+      updateComposioConnection(user.id, { status: "FAILED", statusReason: "Callback identity verification failed", lastError: err.message, checked: true }, db);
       logHistory({ eventType: "composio.identity_rejected", message: "Retour OAuth refusé : identité différente de l'utilisateur ayant démarré la connexion", actor: "system", userId: user.id }, db);
       log.warn("composio callback identity rejected", { userId: user.id });
       throw err;
     }
-    if (row) updateComposioConnection(user.id, { lastError: err instanceof Error ? err.message : String(err), checked: true }, db);
+    updateComposioConnection(user.id, { lastError: err instanceof Error ? err.message : String(err), checked: true }, db);
     throw err;
   }
+
+  if (done.connectedAccountId !== row.connected_account_id) {
+    // Compte activé ≠ compte démarré par cet utilisateur : refus, révocation du compte étranger, état local en erreur.
+    const revoked = await revokeOrphanAccount(client, done.connectedAccountId, "connected account mismatch on callback", user.id);
+    updateComposioConnection(user.id, { status: "FAILED", statusReason: "Callback identity verification failed: connected account mismatch", lastError: revoked ? "Compte activé inattendu révoqué" : "Compte activé inattendu NON révoqué : le révoquer manuellement dans Composio", checked: true }, db);
+    logHistory({ eventType: "composio.identity_rejected", message: `Retour OAuth refusé : compte activé différent de la connexion démarrée (compte étranger ${revoked ? "révoqué" : "à révoquer manuellement"})`, actor: "system", userId: user.id }, db);
+    log.error("complete_auth returned another account than the user's reference: refused", { userId: user.id, revoked });
+    throw new EmaError("FORBIDDEN", "Le compte activé ne correspond pas à la connexion démarrée par cet utilisateur : connexion refusée");
+  }
+
+  logHistory({ eventType: "composio.identity_verified", message: "Retour OAuth vérifié (Callback Identity Verification)", actor: "user", userId: user.id }, db);
+  log.info("composio callback identity verified", { userId: user.id, connectedAccountId: done.connectedAccountId });
   return refreshComposioConnection(user, { ...deps, db, client });
 }
 

@@ -1,36 +1,52 @@
 import { NextResponse } from "next/server";
 import { route } from "@/lib/api";
 import { getEnv } from "@/lib/env";
+import { createLogger } from "@/lib/logger";
 import { completeComposioCallback, refreshComposioConnection, resolveCallbackMode } from "@/integrations/composio/outlook-poc";
 import { requirePoc } from "../_guard";
 
+const log = createLogger("composio.callback");
+
 /**
- * Retour du parcours OAuth hébergé par Composio.
+ * Retour du parcours OAuth hébergé par Composio. Le mode est EXPLICITE :
  *
- * Mode `verified` (verifier URL du projet Composio = cette route) : Composio
- * ajoute un `session_uri` à usage unique. Il est consommé côté serveur avec
- * l'utilisateur de la session EMA (`complete_auth`) ; la connexion n'est
- * activée que si c'est bien lui qui a démarré le parcours.
+ * - `verified` (verifier URL du projet Composio = cette route) : `session_uri`
+ *   obligatoire, consommé côté serveur avec l'utilisateur de la session EMA
+ *   (`complete_auth`) ; sans `session_uri`, refus propre, aucun appel.
+ * - `local` (hors production uniquement) : `complete_auth` n'est JAMAIS appelé,
+ *   l'état est simplement relu chez Composio ; un `session_uri` inattendu
+ *   signale une incohérence de configuration (verifier URL actif côté Composio
+ *   alors que COMPOSIO_CALLBACK_VERIFICATION=false) et n'est pas consommé.
  *
- * Mode `local` (hors production uniquement) : aucun paramètre n'est lu ; l'état
- * est simplement relu chez Composio pour l'utilisateur de session.
- *
- * Sans session (autre navigateur, cookie perdu), rien n'est consommé : l'utilisateur
- * se reconnecte à EMA puis relance la connexion depuis la page POC.
+ * Sans session EMA (autre navigateur, cookie perdu), rien n'est consommé.
  */
 export const GET = route(
   async (req, _ctx, sessionUser) => {
     requirePoc();
     const base = getEnv().APP_URL.replace(/\/+$/, "");
     const sessionUri = new URL(req.url).searchParams.get("session_uri");
+    const back = (params: Record<string, string>) => NextResponse.redirect(`${base}/poc/composio?${new URLSearchParams(params).toString()}`, { status: 302 });
     if (!sessionUser) return NextResponse.redirect(`${base}/login?error=${encodeURIComponent("Session EMA absente : reconnectez-vous puis relancez la connexion Outlook via Composio.")}`, { status: 302 });
     try {
       const mode = resolveCallbackMode();
-      const state = mode === "verified" || sessionUri ? await completeComposioCallback(sessionUser, sessionUri ?? "") : await refreshComposioConnection(sessionUser);
-      return NextResponse.redirect(`${base}/poc/composio?returned=1&status=${encodeURIComponent(state.status)}`, { status: 302 });
+      if (mode === "verified") {
+        if (!sessionUri) {
+          log.warn("verified callback without session_uri", { userId: sessionUser.id });
+          return back({ error: "Retour OAuth invalide : session_uri absent (verifier URL Composio mal configuré ?). Relancez la connexion." });
+        }
+        const state = await completeComposioCallback(sessionUser, sessionUri);
+        return back({ returned: "1", status: state.status });
+      }
+      // Mode local : jamais de complete_auth.
+      if (sessionUri) {
+        log.warn("session_uri received in local callback mode: not consumed (configuration mismatch: verifier URL set in Composio but COMPOSIO_CALLBACK_VERIFICATION=false)", { userId: sessionUser.id });
+        return back({ error: "Incohérence de configuration : un session_uri a été reçu alors que COMPOSIO_CALLBACK_VERIFICATION=false. Activez la vérification (recommandé) ou retirez le verifier URL côté Composio. Rien n'a été consommé." });
+      }
+      const state = await refreshComposioConnection(sessionUser);
+      return back({ returned: "1", status: state.status });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur";
-      return NextResponse.redirect(`${base}/poc/composio?error=${encodeURIComponent(message.slice(0, 200))}`, { status: 302 });
+      return back({ error: message.slice(0, 200) });
     }
   },
   { public: true },

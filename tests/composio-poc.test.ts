@@ -4,10 +4,17 @@ import * as users from "@/database/repositories/users";
 import { getComposioConnection, updateComposioConnection } from "@/database/repositories/composio-connections";
 import { listHistory } from "@/database/repositories/history";
 import { ComposioClient, ComposioError, createComposioClient, DEFAULT_COMPOSIO_BASE_URL, parseInputParameters, sanitizeAccount } from "@/integrations/composio/client";
-import { assertReadOnlySlug, isReadOnlyTool, OPERATION_TOOLS, resolveOperation } from "@/integrations/composio/policy";
+import { assertReadOnlySlug, isReadOnlyTool, managedOAuthScopes, OPERATION_TOOLS, POC_READ_ONLY_SCOPES, resolveOperation } from "@/integrations/composio/policy";
 import { completeComposioCallback, disconnectComposio, findEmail, getPocState, listPocTools, LOCAL_CALLBACK_WARNING, refreshComposioConnection, resetComposioPocForTests, resolveCallbackMode, runPocRead, shapeArguments, startComposioConnection } from "@/integrations/composio/outlook-poc";
 import { resetEnvCache } from "@/lib/env";
 import { fakeFetch, json, type RecordedCall } from "./helpers/fake-graph";
+
+/** Utilisateur de session simulé pour les tests de route (le wrapper `route()` lit getSessionUser). */
+const sessionUserRef: { current: import("@/database/types").UserRow | null } = { current: null };
+vi.mock("@/security/auth", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/security/auth")>();
+  return { ...original, getSessionUser: async () => sessionUserRef.current };
+});
 
 /** Clé factice, jamais réelle : sert uniquement à prouver qu'elle ne fuit nulle part. */
 const FAKE_KEY = "composio-test-key-DO-NOT-LEAK-0123456789";
@@ -625,17 +632,28 @@ describe("POC Composio — retour OAuth : mode local (développement) et Callbac
     await expect(completeComposioCallback(a, "https://backend.composio.dev/session/abc", { db, client: c })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("complete_auth : un autre utilisateur revient du parcours (session fixation) → 400, connexion FAILED, rien d'activé", async () => {
+  it("session fixation : un autre utilisateur revient du parcours → refus, rien d'activé (sans état local : aucun appel ; avec son propre parcours : 400 Composio)", async () => {
     setEnv("COMPOSIO_CALLBACK_VERIFICATION", "true");
     resetEnvCache();
     const fake = fakeComposio();
     const c = client(fake.fetchImpl);
-    // A démarre le parcours et transmet le lien ; B (authentifié dans EMA) revient sur le verifier URL.
+    // A démarre le parcours et transmet le lien ; B (authentifié dans EMA, sans parcours) revient sur le verifier URL.
     const { connectedAccountId } = await startComposioConnection(a, "https://ema.test/cb", { db, client: c });
     fake.sessions.set("https://backend.composio.dev/session/fix", { accountId: connectedAccountId, ownerUserId: a.id });
     await expect(completeComposioCallback(b, "https://backend.composio.dev/session/fix", { db, client: c })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(fake.accounts.get(connectedAccountId)?.status).toBe("FAILED");
+    expect(fake.calls.filter((x) => x.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0); // refus local, avant Composio
+    expect(fake.accounts.get(connectedAccountId)?.status).toBe("INITIATED"); // rien d'activé
     expect(getComposioConnection(b.id, db)).toBeUndefined();
+
+    // Variante : B a démarré SON propre parcours (état local en attente) puis termine le lien de A.
+    const own = await startComposioConnection(b, "https://ema.test/cb", { db, client: c });
+    await expect(completeComposioCallback(b, "https://backend.composio.dev/session/fix", { db, client: c })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const call = fake.calls.find((x) => x.url.endsWith("/connected_accounts/complete_auth"))!;
+    expect(call.body).toEqual({ session_uri: "https://backend.composio.dev/session/fix", user_id: b.id });
+    expect(fake.accounts.get(connectedAccountId)?.status).toBe("FAILED"); // Composio : identité différente
+    expect(fake.accounts.get(own.connectedAccountId)?.status).toBe("INITIATED"); // le parcours de B n'est pas activé
+    expect(getComposioConnection(b.id, db)?.status).toBe("FAILED");
+    expect(getComposioConnection(b.id, db)?.connected_account_id).toBe(own.connectedAccountId);
     expect((await refreshComposioConnection(a, { db, client: c })).status).toBe("error");
     expect(getPocState(a, db).statusReason).toMatch(/identity verification failed/i);
     expect(fake.executed).toHaveLength(0);
@@ -652,14 +670,135 @@ describe("POC Composio — retour OAuth : mode local (développement) et Callbac
     await expect(completeComposioCallback(a, "javascript:alert(1)", { db, client: c })).rejects.toMatchObject({ code: "VALIDATION" });
   });
 
-  it("complete_auth : compte activé différent de la référence de l'utilisateur → refus", async () => {
+  it("complete_auth : compte activé différent de la référence → refus, compte étranger révoqué, référence locale jamais remplacée", async () => {
     setEnv("COMPOSIO_CALLBACK_VERIFICATION", "true");
     resetEnvCache();
     const fake = fakeComposio({ accounts: [{ id: "ca_other", status: "INITIATED", user_id: a.id }] });
     const c = client(fake.fetchImpl);
-    await startComposioConnection(a, "https://ema.test/cb", { db, client: c });
+    const { connectedAccountId } = await startComposioConnection(a, "https://ema.test/cb", { db, client: c });
     fake.sessions.set("https://backend.composio.dev/session/other", { accountId: "ca_other", ownerUserId: a.id });
     await expect(completeComposioCallback(a, "https://backend.composio.dev/session/other", { db, client: c })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(getComposioConnection(a.id, db)?.status).toBe("FAILED");
+    // Le compte activé par Composio (ca_other) est immédiatement supprimé + révoqué.
+    expect(fake.calls.some((x) => x.method === "DELETE" && x.url.includes("/connected_accounts/ca_other") && x.url.includes("revoke_on_delete=true"))).toBe(true);
+    expect(fake.accounts.has("ca_other")).toBe(false);
+    // La référence locale garde l'identifiant démarré, en erreur ; jamais remplacée par ca_other.
+    const row = getComposioConnection(a.id, db)!;
+    expect(row.connected_account_id).toBe(connectedAccountId);
+    expect(row.status).toBe("FAILED");
+    expect(row.status_reason).toMatch(/connected account mismatch/);
+    expect(row.last_error).toMatch(/révoqué/);
+    expect(listHistory({ limit: 10, userId: a.id }, db).some((h) => h.event_type === "composio.identity_rejected")).toBe(true);
+    // Aucune lecture possible ensuite.
+    await expect(runPocRead(a, "list_recent", {}, { db, client: c })).rejects.toMatchObject({ code: "MICROSOFT_RECONNECT" });
+  });
+
+  it("complete_auth : échec de révocation du compte étranger → refus maintenu, échec journalisé sans secret", async () => {
+    setEnv("COMPOSIO_CALLBACK_VERIFICATION", "true");
+    resetEnvCache();
+    const inner = fakeComposio({ accounts: [{ id: "ca_other", status: "INITIATED", user_id: a.id }] });
+    // DELETE de ca_other échoue (500) ; tout le reste passe par le faux serveur.
+    const failingDelete: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if ((init?.method ?? "GET") === "DELETE" && url.includes("/connected_accounts/ca_other")) return json({ error: { message: "internal" } }, 500);
+      return inner.fetchImpl(input, init);
+    };
+    const c = client(failingDelete);
+    const lines: string[] = [];
+    const spies = [vi.spyOn(console, "log"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")].map((s) => s.mockImplementation((...args: unknown[]) => { lines.push(args.map(String).join(" ")); }));
+    try {
+      const { connectedAccountId } = await startComposioConnection(a, "https://ema.test/cb", { db, client: c });
+      inner.sessions.set("https://backend.composio.dev/session/other2", { accountId: "ca_other", ownerUserId: a.id });
+      await expect(completeComposioCallback(a, "https://backend.composio.dev/session/other2", { db, client: c })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      const row = getComposioConnection(a.id, db)!;
+      expect(row.connected_account_id).toBe(connectedAccountId);
+      expect(row.status).toBe("FAILED");
+      expect(row.last_error).toMatch(/NON révoqué/);
+    } finally {
+      spies.forEach((s) => s.mockRestore());
+    }
+    const logged = lines.join("\n");
+    expect(logged).toMatch(/could NOT be revoked/);
+    expect(logged).not.toContain(FAKE_KEY);
+    expect(logged).not.toContain(FAKE_TOKEN);
+  });
+
+  it("callback vérifié sans connexion locale en attente → refus AVANT tout appel complete_auth, rien d'activé, aucune référence créée", async () => {
+    setEnv("COMPOSIO_CALLBACK_VERIFICATION", "true");
+    resetEnvCache();
+    // Un compte pending existe chez Composio pour B (démarré hors EMA, ou état local perdu) : EMA n'en a aucune trace.
+    const fake = fakeComposio({ accounts: [{ id: "ca_pending_b", status: "INITIATED", user_id: b.id }] });
+    const c = client(fake.fetchImpl);
+    fake.sessions.set("https://backend.composio.dev/session/norow", { accountId: "ca_pending_b", ownerUserId: b.id });
+    await expect(completeComposioCallback(b, "https://backend.composio.dev/session/norow", { db, client: c })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.calls.filter((x) => x.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0);
+    expect(fake.accounts.get("ca_pending_b")?.status).toBe("INITIATED"); // jamais activé
+    expect(fake.sessions.has("https://backend.composio.dev/session/norow")).toBe(true); // session non consommée
+    expect(getComposioConnection(b.id, db)).toBeUndefined();
+    expect(listHistory({ limit: 10, userId: b.id }, db).some((h) => h.event_type === "composio.identity_rejected" && /aucune connexion en attente/.test(h.message))).toBe(true);
+    // Connexion locale existante mais plus en attente (déjà ACTIVE) : refus également, sans appel.
+    const { connectedAccountId } = await startComposioConnection(a, "https://ema.test/cb", { db, client: c });
+    updateComposioConnection(a.id, { status: "ACTIVE" }, db);
+    fake.sessions.set("https://backend.composio.dev/session/again", { accountId: connectedAccountId, ownerUserId: a.id });
+    await expect(completeComposioCallback(a, "https://backend.composio.dev/session/again", { db, client: c })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(fake.calls.filter((x) => x.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0);
+  });
+
+  it("route callback : mode vérifié sans session_uri → refus sans appel ; mode local avec session_uri → non consommé, incohérence signalée", async () => {
+    const { GET } = await import("@/app/api/poc/composio/callback/route");
+    // Mode vérifié, utilisateur de session A, aucun session_uri.
+    setEnv("COMPOSIO_CALLBACK_VERIFICATION", "true");
+    setEnv("APP_URL", "https://ema.test");
+    resetEnvCache();
+    const fake = fakeComposio();
+    const { setComposioClientForTests } = await import("@/integrations/composio/outlook-poc");
+    setComposioClientForTests(client(fake.fetchImpl));
+    // La route travaille sur la base globale du process : l'utilisateur et sa connexion y sont créés.
+    const { getDb } = await import("@/database/connection");
+    const ra = users.getUserByEmail("route-a@3t.fr", getDb()) ?? users.createUser({ email: "route-a@3t.fr" }, getDb());
+    try {
+      const { connectedAccountId } = await startComposioConnection(ra, "https://ema.test/cb");
+      sessionUserRef.current = ra;
+      const res1 = await GET(new Request("https://ema.test/api/poc/composio/callback"), {});
+      expect(res1.status).toBe(302);
+      const errorOf = (res: Response) => new URL(res.headers.get("location") ?? "https://x/").searchParams.get("error") ?? "";
+      expect(errorOf(res1)).toMatch(/session_uri absent/);
+      expect(fake.calls.filter((x) => x.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0);
+
+      // Mode local (développement) avec un session_uri inattendu : jamais consommé.
+      setEnv("COMPOSIO_CALLBACK_VERIFICATION", "false");
+      setEnv("NODE_ENV", "development");
+      resetEnvCache();
+      fake.sessions.set("https://backend.composio.dev/session/unexpected", { accountId: connectedAccountId, ownerUserId: ra.id });
+      const res2 = await GET(new Request("https://ema.test/api/poc/composio/callback?session_uri=https%3A%2F%2Fbackend.composio.dev%2Fsession%2Funexpected"), {});
+      expect(res2.status).toBe(302);
+      expect(errorOf(res2)).toMatch(/Incohérence de configuration/);
+      expect(fake.calls.filter((x) => x.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0);
+      expect(fake.sessions.has("https://backend.composio.dev/session/unexpected")).toBe(true);
+      expect(fake.accounts.get(connectedAccountId)?.status).toBe("INITIATED");
+
+      // Mode local sans session_uri : simple relecture du statut.
+      fake.accounts.get(connectedAccountId)!.status = "ACTIVE";
+      const res3 = await GET(new Request("https://ema.test/api/poc/composio/callback"), {});
+      expect(new URL(res3.headers.get("location") ?? "https://x/").searchParams.get("status")).toBe("connected");
+      expect(fake.calls.filter((x) => x.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0);
+
+      // Sans session EMA : redirection vers la connexion, rien consommé.
+      sessionUserRef.current = null;
+      const res4 = await GET(new Request("https://ema.test/api/poc/composio/callback?session_uri=https%3A%2F%2Fbackend.composio.dev%2Fsession%2Funexpected"), {});
+      expect(res4.headers.get("location")).toMatch(/\/login\?error=/);
+      expect(fake.calls.filter((x) => x.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0);
+    } finally {
+      sessionUserRef.current = null;
+      setComposioClientForTests(null);
+      setEnv("APP_URL", undefined);
+      await disconnectComposio(ra).catch(() => undefined);
+    }
+  });
+
+  it("scopes Managed OAuth lecture seule : chaîne séparée par des virgules, sans aucun scope d'écriture", () => {
+    expect(managedOAuthScopes()).toBe("openid,profile,offline_access,User.Read,Mail.Read,Calendars.Read");
+    expect(managedOAuthScopes()).not.toMatch(/\s/);
+    for (const forbidden of ["Mail.Send", "Mail.ReadWrite", "Calendars.ReadWrite", "Files.ReadWrite", ".Write"]) expect(managedOAuthScopes()).not.toContain(forbidden);
+    expect([...POC_READ_ONLY_SCOPES]).toEqual(["openid", "profile", "offline_access", "User.Read", "Mail.Read", "Calendars.Read"]);
   });
 });
