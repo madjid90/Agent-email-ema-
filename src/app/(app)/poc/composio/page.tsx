@@ -1,0 +1,23 @@
+import { notFound } from "next/navigation";
+import { ComposioPocPanel } from "@/components/composio-poc-panel";
+import { getPocState, isComposioPocEnabled } from "@/integrations/composio/outlook-poc";
+import { requireSessionUser } from "@/security/auth";
+
+export const dynamic = "force-dynamic";
+
+/** Page POC « Outlook via Composio » : visible uniquement si COMPOSIO_POC_ENABLED=true. */
+export default async function ComposioPocPage({ searchParams }: { searchParams: Promise<{ error?: string; returned?: string }> }) {
+  if (!isComposioPocEnabled()) notFound();
+  const { error, returned } = await searchParams;
+  const user = await requireSessionUser();
+  const state = getPocState(user);
+  return (
+    <>
+      <h1>POC — Outlook via Composio</h1>
+      <p className="muted" style={{ marginBottom: "1rem" }}>
+        Test technique en lecture seule, isolé de l&apos;intégration Microsoft Graph existante (qui reste utilisée par EMA). Compte : <strong>{user.email}</strong>.
+      </p>
+      <ComposioPocPanel initial={state} notice={error ? { tone: "danger", text: `Connexion refusée : ${error}` } : returned ? { tone: "info", text: "Retour du parcours OAuth : statut relu chez Composio." } : null} />
+    </>
+  );
+}

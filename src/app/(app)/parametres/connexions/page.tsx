@@ -2,6 +2,7 @@ import { ConnectionsPanel } from "@/components/connections-panel";
 import { getOutlookStatus } from "@/integrations/microsoft";
 import { getWhatsappActivation } from "@/integrations/whatsapp/activation";
 import { requireSessionUser } from "@/security/auth";
+import { isComposioPocEnabled } from "@/integrations/composio/outlook-poc";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,13 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
         whatsapp={{ configured: whatsapp.configured, businessNumberDisplay: whatsapp.businessNumberDisplay, openLink: whatsapp.openLink, status: whatsapp.status, phoneDisplay: whatsapp.phoneDisplay, activationText: whatsapp.activationText }}
         notice={notice}
       />
+      {isComposioPocEnabled() ? (
+        <section className="card" style={{ marginTop: "1rem" }}>
+          <h2 style={{ marginTop: 0 }}>Outlook via Composio (POC)</h2>
+          <p className="muted">Test technique en lecture seule, indépendant de la connexion Outlook ci-dessus.</p>
+          <a className="btn small" href="/poc/composio">Ouvrir le POC</a>
+        </section>
+      ) : null}
     </>
   );
 }

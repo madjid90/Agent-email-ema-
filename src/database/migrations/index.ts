@@ -13,10 +13,11 @@ import * as m007 from "./007_whatsapp_chat";
 import * as m008 from "./008_followups";
 import * as m009 from "./009_hardening";
 import * as m010 from "./010_users";
+import * as m011 from "./011_composio_poc";
 
 export interface Migration {
   name: string;
   sql: string;
 }
 
-export const migrations: Migration[] = [m001, m002, m003, m004, m005, m006, m007, m008, m009, m010].map((m) => ({ name: m.name, sql: m.sql }));
+export const migrations: Migration[] = [m001, m002, m003, m004, m005, m006, m007, m008, m009, m010, m011].map((m) => ({ name: m.name, sql: m.sql }));

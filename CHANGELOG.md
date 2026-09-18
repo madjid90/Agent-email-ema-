@@ -2,6 +2,10 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [Non publié] — POC Outlook via Composio (lecture seule, branche `poc/composio-outlook`)
+
+Test technique isolé, désactivé par défaut (`COMPOSIO_POC_ENABLED=false` → EMA inchangé). Client REST v3.1 (`src/integrations/composio/client.ts`, SDK écarté : Node ≥ 22.22.3 requis), politique lecture seule fail-closed (`policy.ts`), service par utilisateur (`outlook-poc.ts`), migration `011_composio_poc` (références uniquement, aucun token), routes `/api/poc/composio/*`, page `/poc/composio`, 21 tests mockés. Procédure de smoke test : `docs/composio-poc.md`.
+
 ## [1.1.0] — Assistant multi-dirigeants : comptes, Outlook par utilisateur, WhatsApp EMA central — 2026-09-18
 
 Changement de modèle : une instance héberge plusieurs comptes ; chaque dirigeant connecte SA boîte Outlook et parle à EMA depuis son WhatsApp personnel vers UN numéro WhatsApp Business EMA. Le moteur (tools, Action Engine, validations, réconciliation, worker) est conservé.

@@ -61,6 +61,13 @@ const envSchema = z.object({
   PDF_EXTRACTION_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(120).default(20),
   /** Chiffrement des sauvegardes (scripts/backup.sh) : AES-256-GCM, clé dérivée par scrypt. */
   BACKUP_ENCRYPTION_PASSWORD: z.string().min(12, "12 caractères minimum").optional(),
+  /** POC Composio (Outlook via Composio, lecture seule). Désactivé par défaut : EMA fonctionne exactement comme avant. */
+  COMPOSIO_POC_ENABLED: optionalBool(false),
+  /** Clé API Composio : serveur uniquement, jamais journalisée ni renvoyée. */
+  COMPOSIO_API_KEY: optionalString,
+  /** Auth config Outlook créée dans le tableau de bord Composio (sinon : découverte si une seule existe). */
+  COMPOSIO_OUTLOOK_AUTH_CONFIG_ID: optionalString,
+  COMPOSIO_BASE_URL: z.string().trim().default("https://api.composio.dev"),
   /** `true` uniquement si Nginx réécrit X-Forwarded-For (sinon l'en-tête n'est pas fiable). */
   TRUST_PROXY_HEADER: optionalBool(false),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
