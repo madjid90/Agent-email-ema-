@@ -20,7 +20,7 @@ const log = createLogger("microsoft.oauth");
  * - Mail.Send      : reply / forward / sendMail
  * Pas de Mail.ReadWrite : EMA ne modifie, ne déplace et ne supprime aucun email.
  */
-export const GRAPH_SCOPES = ["offline_access", "User.Read", "Mail.Read", "Mail.Send"] as const;
+export const GRAPH_SCOPES = ["openid", "profile", "offline_access", "User.Read", "Mail.Read", "Mail.Send"] as const;
 
 const STATE_KEY = "outlook.oauth_state";
 const STATE_TTL_MS = 10 * 60 * 1000;
@@ -29,6 +29,13 @@ export interface OAuthDeps {
   db?: Db;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /** Utilisateur qui connecte SA boîte (session serveur). null : instance mono-utilisateur historique. */
+  userId?: string | null;
+}
+
+/** Clé de l'état anti-CSRF : une par état, plusieurs utilisateurs peuvent se connecter en parallèle. */
+function stateKey(state: string): string {
+  return `${STATE_KEY}:${state}`;
 }
 
 function authority(): string {
@@ -48,25 +55,30 @@ function credentials(): { clientId: string; clientSecret: string; redirectUri: s
 export function createOAuthState(deps: OAuthDeps = {}): string {
   const db = deps.db ?? getDb();
   const state = randomBytes(24).toString("base64url");
-  kvSet(STATE_KEY, JSON.stringify({ state, createdAt: (deps.now ?? Date.now)() }), db);
+  kvSet(stateKey(state), JSON.stringify({ state, userId: deps.userId ?? null, createdAt: (deps.now ?? Date.now)() }), db);
   return state;
 }
 
-/** Vérifie et consomme l'état (usage unique, 10 minutes). */
-export function consumeOAuthState(candidate: string, deps: OAuthDeps = {}): boolean {
+/**
+ * Vérifie et consomme l'état (usage unique, 10 minutes). Renvoie l'utilisateur
+ * qui a lancé le flux : c'est lui, et lui seul, qui reçoit la connexion — le
+ * callback Microsoft ne fait confiance ni à un cookie ni à un paramètre libre.
+ */
+export function consumeOAuthState(candidate: string, deps: OAuthDeps = {}): { ok: true; userId: string | null } | { ok: false } {
   const db = deps.db ?? getDb();
-  const raw = kvGet(STATE_KEY, db);
-  kvSet(STATE_KEY, "", db);
-  if (!raw) return false;
-  let parsed: { state?: string; createdAt?: number };
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(candidate)) return { ok: false };
+  const raw = kvGet(stateKey(candidate), db);
+  db.prepare("DELETE FROM settings_kv WHERE key = ?").run(stateKey(candidate));
+  if (!raw) return { ok: false };
+  let parsed: { state?: string; userId?: string | null; createdAt?: number };
   try {
-    parsed = JSON.parse(raw) as { state?: string; createdAt?: number };
+    parsed = JSON.parse(raw) as { state?: string; userId?: string | null; createdAt?: number };
   } catch {
-    return false;
+    return { ok: false };
   }
-  if (!parsed.state || parsed.state !== candidate) return false;
-  if (!parsed.createdAt || (deps.now ?? Date.now)() - parsed.createdAt > STATE_TTL_MS) return false;
-  return true;
+  if (!parsed.state || parsed.state !== candidate) return { ok: false };
+  if (!parsed.createdAt || (deps.now ?? Date.now)() - parsed.createdAt > STATE_TTL_MS) return { ok: false };
+  return { ok: true, userId: parsed.userId ?? null };
 }
 
 /* Flux authorization code -------------------------------------------------- */
@@ -143,22 +155,25 @@ export async function completeConnection(
   input: { code: string; state: string },
   fetchMe: (accessToken: string) => Promise<{ email: string | null; displayName: string | null }>,
   deps: OAuthDeps = {},
-): Promise<{ accountEmail: string | null }> {
+): Promise<{ accountEmail: string | null; userId: string | null }> {
   const db = deps.db ?? getDb();
-  if (!consumeOAuthState(input.state, deps)) throw new EmaError("FORBIDDEN", "État OAuth invalide ou expiré : relancer la connexion");
+  const state = consumeOAuthState(input.state, deps);
+  if (!state.ok) throw new EmaError("FORBIDDEN", "État OAuth invalide ou expiré : relancer la connexion");
+  const userId = state.userId;
   const set = await exchangeCodeForTokens(input.code, deps);
   const me = await fetchMe(set.accessToken);
-  saveTokenSet(set, me.email, db);
-  kvSet("outlook.connected_at", nowIso(), db);
-  logHistory({ eventType: "outlook.connected", message: `Outlook connecté : ${me.email ?? "adresse inconnue"}`, actor: "user" }, db);
-  log.info("outlook connected", { account: me.email });
-  return { accountEmail: me.email };
+  saveTokenSet(set, me.email, db, userId);
+  kvSet(userId ? `outlook.connected_at:${userId}` : "outlook.connected_at", nowIso(), db);
+  logHistory({ eventType: "outlook.connected", message: `Outlook connecté : ${me.email ?? "adresse inconnue"}`, actor: "user", userId }, db);
+  log.info("outlook connected", { userId, account: me.email });
+  return { accountEmail: me.email, userId };
 }
 
 export function disconnect(deps: OAuthDeps = {}): void {
   const db = deps.db ?? getDb();
-  const existing = loadTokenSet(db);
-  clearTokenSet(db);
-  kvSet("outlook.sync_cursor", "", db);
-  logHistory({ eventType: "outlook.disconnected", message: `Outlook déconnecté${existing?.accountEmail ? ` (${existing.accountEmail})` : ""}`, actor: "user" }, db);
+  const existing = loadTokenSet(db, deps.userId);
+  if (!existing) return;
+  clearTokenSet(db, existing.userId);
+  kvSet(existing.userId ? `outlook.sync_cursor:${existing.userId}` : "outlook.sync_cursor", "", db);
+  logHistory({ eventType: "outlook.disconnected", message: `Outlook déconnecté${existing.accountEmail ? ` (${existing.accountEmail})` : ""}`, actor: "user", userId: existing.userId }, db);
 }

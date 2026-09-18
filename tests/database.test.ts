@@ -18,7 +18,7 @@ describe("SQLite", () => {
     expect(status.length).toBeGreaterThan(0);
     expect(status.every((s) => s.applied)).toBe(true);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((t) => t.name);
-    for (const t of ["emails", "email_analyses", "actions", "approvals", "scheduled_followups", "documents", "history", "oauth_tokens", "worker_locks", "settings_kv", "chat_messages"]) {
+    for (const t of ["emails", "email_analyses", "actions", "approvals", "scheduled_followups", "documents", "history", "connections", "users", "worker_locks", "settings_kv", "chat_messages"]) {
       expect(tables).toContain(t);
     }
   });

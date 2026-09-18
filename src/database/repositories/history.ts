@@ -13,15 +13,18 @@ export interface HistoryEvent {
   followupId?: string | null;
   approvalId?: string | null;
   details?: unknown;
+  /** Utilisateur concerné (audit par compte). */
+  userId?: string | null;
 }
 
 export function logHistory(event: HistoryEvent, db: Db = getDb()): HistoryRow {
   const id = newId("his");
   db.prepare(
-    `INSERT INTO history (id, at, event_type, message, actor, email_id, action_id, document_id, followup_id, approval_id, details)
-     VALUES (@id, @at, @event_type, @message, @actor, @email_id, @action_id, @document_id, @followup_id, @approval_id, @details)`,
+    `INSERT INTO history (id, at, event_type, message, actor, email_id, action_id, document_id, followup_id, approval_id, details, user_id)
+     VALUES (@id, @at, @event_type, @message, @actor, @email_id, @action_id, @document_id, @followup_id, @approval_id, @details, @user_id)`,
   ).run({
     id,
+    user_id: event.userId ?? null,
     at: nowIso(),
     event_type: event.eventType,
     message: event.message,
@@ -36,9 +39,13 @@ export function logHistory(event: HistoryEvent, db: Db = getDb()): HistoryRow {
   return db.prepare("SELECT * FROM history WHERE id = ?").get(id) as HistoryRow;
 }
 
-export function listHistory(opts: { limit?: number; since?: string; emailId?: string; actionId?: string } = {}, db: Db = getDb()): HistoryRow[] {
+export function listHistory(opts: { limit?: number; since?: string; emailId?: string; actionId?: string; userId?: string } = {}, db: Db = getDb()): HistoryRow[] {
   const clauses: string[] = [];
   const params: Record<string, unknown> = { limit: opts.limit ?? 200 };
+  if (opts.userId) {
+    clauses.push("user_id = @user_id");
+    params.user_id = opts.userId;
+  }
   if (opts.since) {
     clauses.push("at >= @since");
     params.since = opts.since;

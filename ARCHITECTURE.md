@@ -69,7 +69,8 @@ Voir section 4.
 
 ### 3.8 Sécurité (`src/security`)
 - `untrusted.ts` : encapsulation du contenu email/documents.
-- `auth.ts` : session UI (cookie signé HMAC `APP_SECRET`, mot de passe `APP_PASSWORD`).
+- `auth.ts` : session par compte (cookie signé HMAC `APP_SECRET` portant `user_id`), `getSessionUser()` / `requireSessionUser()` — seule source d'identité côté web.
+- `accounts.ts` / `passwords.ts` : inscription (premier compte = `owner`, suivants si `ALLOW_SIGNUP=true`), connexion email + mot de passe (scrypt).
 - `crypto.ts` : chiffrement AES-256-GCM des tokens OAuth avec une clé dérivée d'`APP_SECRET`.
 
 ## 4. SQLite
@@ -119,12 +120,31 @@ PROPOSED ──(requires_approval)──▶ WAITING_APPROVAL ──▶ APPROVED 
 - Appels Graph : `GET /me/mailFolders/inbox/messages/delta` (synchronisation incrémentale, curseur local), `GET /me/messages/{id}`, `GET /me/messages?$filter=conversationId eq '…'`, `GET /me/messages?$search=…`, `GET /me/messages/{id}/attachments`, `POST /me/messages/{id}/reply`, `POST /me/messages/{id}/forward`, `POST /me/sendMail`.
 - Refresh token automatique avant expiration ; erreur 401 → `refresh` puis retry unique. Détails : `docs/outlook.md`.
 
+## 6 bis. Comptes utilisateurs et multi-client (18/09/2026)
+
+```
+WhatsApp personnel du dirigeant ──▶ numéro WhatsApp Business EMA ──▶ webhook Meta (signé)
+   ──▶ identifySender(from) : E.164 → users.phone_number (vérifié, activé)
+         ├─ inconnu      → message d'onboarding (borné), aucun appel Microsoft, aucune donnée
+         ├─ en attente   → activation (phone_verified = 1) + bienvenue
+         └─ utilisateur  → router (boutons / décision naturelle / assistant) avec userId
+   ──▶ tools (ToolContext.userId) ──▶ connections[user_id, microsoft] ──▶ Microsoft Graph (SA boîte)
+   ──▶ réponse WhatsApp vers le numéro de l'utilisateur
+```
+
+- `users` : `id`, `organization_id` (réservé), `email` (unique), `password_hash`, `role`, `status`, `phone_number` (E.164, unique parmi les actifs), `phone_verified`, `whatsapp_enabled`, `verified_at`.
+- `connections` : `user_id`, `provider`, `encrypted` (tokens AES-256-GCM), `scopes`, `expires_at`, `provider_account_email`, `status` (`active` / `revoked`). Remplace `oauth_tokens` (migration `010_users` ; une connexion héritée sans compte est adoptée par le premier compte créé).
+- `user_id` sur `emails`, `documents`, `actions`, `scheduled_followups`, `chat_messages`, `history` ; hérité automatiquement de l'email source (actions, documents, relances) ou fixé par le serveur (chat, WhatsApp).
+- Lecture : toutes les listes acceptent `userId` ; les routes API et pages le passent depuis la session ; les tools via `assertOwned` / `ToolContext.userId`. Exécution : chaque exécuteur reçoit `ctx.userId` et n'utilise que la connexion du propriétaire de l'action.
+- Web et WhatsApp partagent le même `user_id` ; les conversations sont séparées par canal et par utilisateur.
+- Ajouter un client : compte (`/login` → « Créer un compte », ou `ALLOW_SIGNUP=true`), Outlook (Paramètres → Connexions), numéro puis premier message WhatsApp. Aucune modification de code.
+
 ## 7. WhatsApp
 
 - Envoi : `POST https://graph.facebook.com/{version}/{PHONE_NUMBER_ID}/messages` type `interactive` (boutons `✅ Valider`, `❌ Refuser`), texte long en message séparé si nécessaire. Client centralisé `src/integrations/whatsapp/client.ts` (retries 429/5xx bornés).
 - Réception : `GET /api/integrations/whatsapp/webhook` (vérification `hub.verify_token`), `POST` (signature `X-Hub-Signature-256`, événements `button_reply`).
 - Le `button.id` = `approve:<approval_id>` / `reject:<approval_id>`. La modification d'un brouillon se fait depuis l'interface (page À valider).
-- Service `src/integrations/whatsapp/approvals.ts` : notification unique par approval, décision via l'Action Engine (`approveAndExecute` / `rejectAction`), dédoublonnage `webhook_events`, contrôle du numéro autorisé. Détails : `docs/whatsapp.md`.
+- Service `src/integrations/whatsapp/approvals.ts` : notification unique par approval envoyée au numéro vérifié du **propriétaire de l'action**, décision via l'Action Engine (`approveAndExecute` / `rejectAction`) réservée à ce propriétaire, dédoublonnage `webhook_events`. Identification des expéditeurs : `router.ts` (`identifySender`). Activation : `activation.ts`. Détails : `docs/whatsapp.md`.
 
 ## 8. Signatures / tampons (Phase 5)
 

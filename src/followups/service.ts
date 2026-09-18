@@ -7,6 +7,7 @@ import { logHistory } from "@/database/repositories/history";
 import type { EmailRow, FollowupKind, FollowupRow } from "@/database/types";
 import { getSettings, type Company, type Contact, type Rule, type Settings } from "@/lib/config";
 import { getApproverPhone, getEnv } from "@/lib/env";
+import { whatsappRecipientFor } from "@/database/repositories/users";
 import { EmaError } from "@/lib/errors";
 import { nowIso } from "@/lib/ids";
 import { createLogger } from "@/lib/logger";
@@ -51,6 +52,8 @@ export interface FollowupDeps {
   graph?: GraphClient | null;
   whatsapp?: WhatsappClient;
   approverPhone?: string | null;
+  /** Propriétaire des relances créées (session / WhatsApp) ; à défaut, hérité de l'email. */
+  userId?: string | null;
   now?: () => Date;
   actor?: string;
 }
@@ -96,6 +99,7 @@ export function scheduleFollowup(input: ScheduleFollowupInput, deps: FollowupDep
 
   const followup = followupsRepo.insertFollowup(
     {
+      userId: deps.userId ?? email?.user_id ?? null,
       kind,
       threadId: threadId ?? `reminder:${input.emailId ?? input.documentId ?? nowIso()}`,
       emailId: email?.id ?? null,
@@ -224,14 +228,16 @@ export async function processFollowup(followupId: string, deps: FollowupDeps = {
   if (followup.kind === "INTERNAL_REMINDER") return remind(followup, deps);
 
   // 1. Vérification Outlook obligatoire — jamais de supposition « pas de réponse ».
-  const graph = deps.graph === undefined ? (graphFactory ? graphFactory(db) : isOutlookConnected(db) ? createConnectedGraphClient({ db }) : null) : deps.graph;
+  // Boîte du propriétaire de la relance — jamais une autre.
+  const owner = followup.user_id ?? undefined;
+  const graph = deps.graph === undefined ? (graphFactory ? graphFactory(db) : isOutlookConnected(db, owner) ? createConnectedGraphClient({ db, userId: owner }) : null) : deps.graph;
   if (!graph) return checkFailed(followup, "Outlook n'est pas connecté : vérification impossible", deps);
   let thread: EmailRow[];
   try {
     // Source de vérité : le thread réel dans Outlook, pas le cache SQLite.
     const remote = await listConversation(graph, followup.thread_id, 30);
     if (remote.length === 0) return checkFailed(followup, "Thread introuvable dans Outlook", deps);
-    thread = await importConversation(graph, followup.thread_id, { db, max: 30 });
+    thread = await importConversation(graph, followup.thread_id, { db, max: 30, userId: followup.user_id });
   } catch (err) {
     return checkFailed(followup, `Microsoft Graph indisponible : ${err instanceof Error ? err.message : String(err)}`, deps);
   }
@@ -320,7 +326,7 @@ export async function processFollowup(followupId: string, deps: FollowupDeps = {
       requiresApproval: true,
       actor: "ema",
     },
-    { db, settings },
+    { db, settings, userId: followup.user_id },
   );
   followupsRepo.transitionFollowup(followup.id, "CHECKING", "WAITING_APPROVAL", { generated_action_id: action.id, last_error: null, requires_human_review: proposal.requires_human_review ? 1 : 0 }, db);
   logHistory({ eventType: "followup.draft_created", message: `Relance rédigée (tentative ${followup.attempts + 1}/${followup.max_attempts}) : validation requise`, actor: "ema", followupId: followup.id, emailId: anchor.id, actionId: action.id, details: { confidence: proposal.confidence } }, db);
@@ -378,7 +384,8 @@ async function sendNotification(followupId: string, payload: NotificationPayload
   const followup = followupsRepo.getFollowup(followupId, db);
   if (!followup) return false;
   if (followup.notified_at) return true; // dédoublonnage : une seule notification par échéance
-  const approver = deps.approverPhone === undefined ? getApproverPhone() : deps.approverPhone;
+  // Destinataire : numéro WhatsApp vérifié du propriétaire de la relance.
+  const approver = deps.approverPhone !== undefined ? deps.approverPhone : followup.user_id ? whatsappRecipientFor(followup.user_id, db) : getApproverPhone();
   const client = deps.whatsapp ?? (isWhatsappConfigured() ? getWhatsappClient() : null);
   const markPending = (reason: string): boolean => {
     followupsRepo.updateFollowup(followupId, { notification_pending: 1, notify_attempts: followup.notify_attempts + 1, last_error: reason.slice(0, 300) }, db);

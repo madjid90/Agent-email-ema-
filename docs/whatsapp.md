@@ -1,8 +1,24 @@
-# WhatsApp — validation des actions — Phase 3
+# WhatsApp — numéro EMA central, identification par utilisateur
+
+## 0. Modèle (18/09/2026)
+
+**UN numéro WhatsApp Business appartient à EMA** (API officielle Meta, WhatsApp Business Platform). Chaque dirigeant écrit à ce numéro depuis son WhatsApp personnel — qui n'est **jamais** connecté à EMA (ni session, ni QR code, ni contacts, ni appareils).
+
+```
++33 6 12 34 56 78 (dirigeant A) ─┐
++33 6 98 76 54 32 (dirigeant B) ─┼─▶ numéro EMA ─▶ webhook signé ─▶ identifySender(from)
++33 6 11 22 33 44 (dirigeant C) ─┘        └─ users.phone_number (E.164, vérifié) → user_id → connexion Microsoft → tools → réponse
+```
+
+- **Activation** : l'utilisateur saisit son numéro dans Paramètres → Connexions → WhatsApp (`POST /api/me/phone`, normalisé E.164, unique parmi les comptes actifs, `phone_verified = 0`), puis envoie « Bonjour EMA » via le bouton **Ouvrir WhatsApp** (`wa.me/<WHATSAPP_BUSINESS_NUMBER>?text=Bonjour%20EMA`). Le premier message reçu depuis ce numéro l'associe définitivement (`phone_verified = 1`, `whatsapp_enabled = 1`, `verified_at`) et EMA répond par un message de bienvenue. Pas d'infrastructure SMS.
+- **Numéro inconnu** : « Ce numéro n'est pas encore associé à un compte EMA. Connectez-vous à votre espace EMA (Paramètres → Connexions → WhatsApp) pour activer WhatsApp. » — aucun appel Microsoft, aucun appel Claude, aucune donnée, réponse limitée à 3 par heure, journal `whatsapp.unknown_number` sans le numéro complet (code `UNKNOWN_USER`).
+- **Désactivation** : `DELETE /api/me/phone` retire le numéro ; EMA ne répond plus.
+- **Isolation** : les actions en attente, les références numérotées, l'historique de conversation et les tools sont scopés par `user_id` ; un utilisateur ne valide que ses propres actions.
+- **Diagnostic** (journaux, jamais de secret ni de numéro complet) : `whatsapp message identified` → `whatsapp assistant turn` → `tool failed` / résultats → `whatsapp reply sent` (tools appelés, `reconnectRequired`).
 
 ## 1. Rôle
 
-WhatsApp est le canal de validation humaine d'EMA. Chaque action sensible (réponse email en phase 3 ; transferts, paiements, signatures dans les phases suivantes) produit **une** demande de validation avec deux boutons : ✅ Valider / ❌ Refuser. Rien n'est envoyé tant que l'utilisateur n'a pas validé.
+WhatsApp est le canal de validation humaine et de dialogue d'EMA. Chaque action sensible (réponse email en phase 3 ; transferts, paiements, signatures dans les phases suivantes) produit **une** demande de validation avec deux boutons : ✅ Valider / ❌ Refuser. Rien n'est envoyé tant que l'utilisateur n'a pas validé.
 
 ```
 Claude → reply_draft → action reply_email (PROPOSED → WAITING_APPROVAL) → approval PENDING
@@ -20,7 +36,8 @@ Claude → reply_draft → action reply_email (PROPOSED → WAITING_APPROVAL) �
 | `WHATSAPP_PHONE_NUMBER_ID` | Identifiant du numéro émetteur WhatsApp Business |
 | `WHATSAPP_VERIFY_TOKEN` | Jeton de vérification de l'abonnement webhook (GET) |
 | `WHATSAPP_APP_SECRET` | Secret de l'app Meta : signature `X-Hub-Signature-256` des webhooks. **Obligatoire en production** (webhook refusé sinon). |
-| `WHATSAPP_APPROVER_PHONE` | Numéro **autorisé à valider** (format international, chiffres, ex. `33612345678`). Seul ce numéro reçoit les demandes et peut décider. |
+| `WHATSAPP_BUSINESS_NUMBER` | Numéro WhatsApp Business d'EMA au format E.164 (ex. `+33700000000`), affiché aux utilisateurs pour le bouton « Ouvrir WhatsApp » |
+| `WHATSAPP_APPROVER_PHONE` | **Obsolète comme identité.** Sert uniquement de destinataire au « message de test » de la page Paramètres. Les demandes de validation partent vers le numéro vérifié du propriétaire de chaque action. |
 | `WHATSAPP_API_VERSION` | Version de l'API Graph Meta (`v21.0`) |
 
 Côté Meta for Developers : app → WhatsApp → *Configuration* → Webhook : URL `https://ema.client.fr/api/integrations/whatsapp/webhook`, verify token = `WHATSAPP_VERIFY_TOKEN`, champ `messages`. Le numéro autorisé doit avoir accepté de recevoir des messages du numéro Business (en test Meta, l'ajouter aux destinataires autorisés ; en production, une conversation « service » ou un template peut être nécessaire selon la fenêtre de 24 h — voir §9).

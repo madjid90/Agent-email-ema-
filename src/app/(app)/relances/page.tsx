@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, Empty, StatusBadge } from "@/components/ui";
 import { FollowupButtons } from "@/components/followup-buttons";
 import { getDb } from "@/database/connection";
+import { requireSessionUser } from "@/security/auth";
 import { listFollowups } from "@/database/repositories/followups";
 import type { FollowupRow } from "@/database/types";
 import { getSettings } from "@/lib/config";
@@ -12,18 +13,19 @@ export const dynamic = "force-dynamic";
 
 const KIND_LABEL: Record<string, string> = { EXTERNAL_FOLLOWUP: "Relance", INTERNAL_REMINDER: "Rappel interne" };
 
-export default function FollowupsPage() {
+export default async function FollowupsPage() {
   const db = getDb();
+  const user = await requireSessionUser(db);
   const settings = getSettings();
   const tz = settings.company.timezone;
   const { end } = dayBounds(tz);
-  const active = listFollowups({ status: ["SCHEDULED", "CHECKING", "CHECK_FAILED", "REMINDED"] }, db);
+  const active = listFollowups({ userId: user.id, status: ["SCHEDULED", "CHECKING", "CHECK_FAILED", "REMINDED"] }, db);
   const today = active.filter((f) => f.execute_at < end);
   const upcoming = active.filter((f) => f.execute_at >= end);
-  const waiting = listFollowups({ status: "WAITING_APPROVAL" }, db);
-  const attention = listFollowups({ status: ["REVIEW_REQUIRED", "MAX_ATTEMPTS_REACHED", "FAILED"] }, db);
-  const sent = listFollowups({ status: ["SENT", "DONE"], limit: 30 }, db);
-  const closed = listFollowups({ status: ["CANCELLED", "RESPONSE_RECEIVED", "SUPERSEDED"], limit: 30 }, db);
+  const waiting = listFollowups({ userId: user.id, status: "WAITING_APPROVAL" }, db);
+  const attention = listFollowups({ userId: user.id, status: ["REVIEW_REQUIRED", "MAX_ATTEMPTS_REACHED", "FAILED"] }, db);
+  const sent = listFollowups({ userId: user.id, status: ["SENT", "DONE"], limit: 30 }, db);
+  const closed = listFollowups({ userId: user.id, status: ["CANCELLED", "RESPONSE_RECEIVED", "SUPERSEDED"], limit: 30 }, db);
 
   const table = (rows: FollowupRow[], withActions: boolean) => (
     <table>

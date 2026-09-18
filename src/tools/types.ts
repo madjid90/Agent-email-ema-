@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EmaError } from "@/lib/errors";
 import type { RiskLevel } from "@/database/types";
 import type { Db } from "@/database/connection";
 import type { Settings, Rule, Company, Contact } from "@/lib/config";
@@ -17,6 +18,23 @@ export interface ToolContext {
   mode: ToolMode;
   /** Email en cours de traitement (mode analyze / followup). */
   currentEmailId?: string | null;
+  /**
+   * Utilisateur pour lequel les tools s'exécutent. Fixé par le serveur
+   * (session web, numéro WhatsApp identifié, email en cours d'analyse) : le
+   * modèle ne peut ni le choisir ni le changer. Chaque tool ne lit et n'écrit
+   * que les données de cet utilisateur et n'utilise que SA connexion Microsoft.
+   */
+  userId?: string | null;
+}
+
+/**
+ * Garde d'isolation : une ligne appartenant à un autre utilisateur est traitée
+ * comme inexistante (NOT_FOUND), jamais révélée. Une ligne sans propriétaire
+ * (données antérieures à 010_users) reste accessible à un contexte non scopé.
+ */
+export function assertOwned(row: { user_id: string | null } | undefined | null, ctx: { userId?: string | null }, what: string): void {
+  if (!row) throw new EmaError("NOT_FOUND", `${what} introuvable`);
+  if (ctx.userId && row.user_id !== ctx.userId) throw new EmaError("NOT_FOUND", `${what} introuvable`);
 }
 
 export type ToolMode = "analyze" | "chat" | "followup" | "internal";

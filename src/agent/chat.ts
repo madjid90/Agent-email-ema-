@@ -9,6 +9,7 @@ import { createLogger } from "@/lib/logger";
 import { getAnthropicClient, getModel } from "@/integrations/anthropic/client";
 import { toLlmError, type StructuredClient } from "@/integrations/anthropic/structured";
 import { executeTool, toAnthropicTools, type ToolResult } from "@/tools";
+import { RECONNECT_MESSAGE } from "@/integrations/microsoft/graph-client";
 import type { ChatChannel } from "@/database/types";
 import type { NewChatMessage } from "@/database/repositories/chat";
 import { toolContextFor } from "./context";
@@ -26,6 +27,10 @@ const HISTORY_MESSAGES = 12;
 export interface ChatDeps {
   db?: Db;
   settings?: Settings;
+  /** Utilisateur de la conversation (session web ou numéro WhatsApp identifié). */
+  userId?: string | null;
+  /** Nom affiché de l'utilisateur (prompt système). */
+  userName?: string | null;
   client?: StructuredClient;
   model?: string;
   /** Canal de la conversation : interface web (défaut) ou WhatsApp (phase 6). */
@@ -47,6 +52,8 @@ export interface ChatDeps {
 export interface ChatTurnResult {
   reply: string;
   toolCalls: { name: string; ok: boolean }[];
+  /** Un tool a échoué faute de connexion Microsoft valide : l'utilisateur doit reconnecter Outlook. */
+  reconnectRequired?: boolean;
 }
 
 /**
@@ -61,19 +68,22 @@ export async function runChatTurn(userMessage: string, deps: ChatDeps = {}): Pro
   const channel = deps.channel ?? "WEB";
   const allowed = deps.toolNames ?? CHAT_READONLY_TOOLS;
 
-  chatRepo.insertMessage({ role: "user", content: userMessage, channel, externalId: deps.userMeta?.externalId ?? null, sender: deps.userMeta?.sender ?? null }, db);
-  const history = chatRepo.listChatMessages(deps.historyLimit ?? HISTORY_MESSAGES, db, channel).filter((m) => m.role !== "tool");
+  const userId = deps.userId ?? null;
+  chatRepo.insertMessage({ userId, role: "user", content: userMessage, channel, externalId: deps.userMeta?.externalId ?? null, sender: deps.userMeta?.sender ?? null }, db);
+  const history = chatRepo.listChatMessages(deps.historyLimit ?? HISTORY_MESSAGES, db, channel, userId).filter((m) => m.role !== "tool");
   const messages: Anthropic.MessageParam[] = history.map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content }));
 
   const tools = toAnthropicTools("chat").filter((t) => (allowed as readonly string[]).includes(t.name));
-  const toolCtx = toolContextFor("chat", null, db);
-  const system = `${getSystemPrompt()}\n\n${getPrompt("chat")}\n\nUtilisateur : ${settings.company.userName || ""} — ${settings.company.name || ""}. Date du jour : ${new Date().toISOString().slice(0, 10)}. Catégories EMA : ${Object.entries(CATEGORY_LABELS)
+  // Le contexte des tools porte l'utilisateur : fixé ici par le serveur, jamais par le modèle.
+  const toolCtx = toolContextFor("chat", null, db, userId);
+  const system = `${getSystemPrompt()}\n\n${getPrompt("chat")}\n\nUtilisateur : ${deps.userName || settings.company.userName || ""} — ${settings.company.name || ""}. Date du jour : ${new Date().toISOString().slice(0, 10)}. Catégories EMA : ${Object.entries(CATEGORY_LABELS)
     .map(([k, v]) => `${k} = ${v}`)
     .join(", ")}.${deps.systemExtra ? `\n\n${deps.systemExtra}` : ""}`;
 
   const toolCalls: ChatTurnResult["toolCalls"] = [];
   const started = Date.now();
   let finalText = "";
+  let reconnectRequired = false;
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await client.messages.create({
@@ -102,6 +112,7 @@ export async function runChatTurn(userMessage: string, deps: ChatDeps = {}): Pro
         const r = await executeTool(use.name, use.input, toolCtx);
         deps.onToolResult?.(use.name, r);
         toolCalls.push({ name: use.name, ok: r.ok });
+        if (!r.ok && r.error.code === "MICROSOFT_RECONNECT") reconnectRequired = true;
         results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(r.ok ? r.data : { error: r.error }).slice(0, 20_000), is_error: !r.ok });
       }
       messages.push({ role: "user", content: results });
@@ -113,8 +124,10 @@ export async function runChatTurn(userMessage: string, deps: ChatDeps = {}): Pro
     log.warn("chat turn failed", { kind: e.kind });
     throw e;
   }
-  chatRepo.insertMessage({ role: "assistant", content: finalText, toolCalls: toolCalls.length ? toolCalls : undefined, channel, ...(deps.assistantMeta?.() ?? {}) }, db);
-  return { reply: finalText, toolCalls };
+  // Connexion Microsoft absente ou révoquée : message explicite et actionnable, sans détour.
+  if (reconnectRequired) finalText = `${RECONNECT_MESSAGE}${finalText ? `\n\n${finalText}` : ""}`;
+  chatRepo.insertMessage({ userId, role: "assistant", content: finalText, toolCalls: toolCalls.length ? toolCalls : undefined, channel, ...(deps.assistantMeta?.() ?? {}) }, db);
+  return { reply: finalText, toolCalls, reconnectRequired };
 }
 
 /** Explication locale d'une analyse (sans appel LLM) : utilisée par le tool get_email_analysis. */

@@ -39,7 +39,12 @@ const envSchema = z.object({
 
   APP_URL: z.string().trim().default("http://localhost:3000"),
   APP_SECRET: optionalString,
+  /** Obsolète (comptes utilisateurs) : ignoré, conservé pour ne pas casser un .env existant. */
   APP_PASSWORD: optionalString,
+  /** Création de comptes après le premier (chaque nouveau client crée le sien). */
+  ALLOW_SIGNUP: optionalBool(false),
+  /** Numéro WhatsApp Business d'EMA, affiché aux utilisateurs (lien « Ouvrir WhatsApp »), format E.164. */
+  WHATSAPP_BUSINESS_NUMBER: optionalString,
 
   DATABASE_PATH: z.string().trim().default("./data/ema.db"),
   PRIVATE_STORAGE_PATH: z.string().trim().default("./private"),
@@ -102,10 +107,7 @@ export function checkEnv(env: Env = getEnv()): EnvIssue[] {
 
   if (!env.APP_SECRET) err("APP_SECRET", "Clé de chiffrement et de signature absente (cookies de session, tokens OAuth)");
   else if (env.APP_SECRET.length < 32) err("APP_SECRET", "Clé trop courte : 32 caractères minimum");
-  if (!env.APP_PASSWORD) err("APP_PASSWORD", "Mot de passe de l'interface absent : l'accès serait ouvert");
-  // En production, un mot de passe court est bloquant : l'interface donne accès
-  // à toute la boîte mail du client, aux documents et aux validations.
-  else if (env.APP_PASSWORD.length < 12) err("APP_PASSWORD", "Mot de passe trop court : 12 caractères minimum");
+  if (env.APP_PASSWORD) warn("APP_PASSWORD", "Variable obsolète : l'accès se fait désormais par compte utilisateur (email + mot de passe)");
   if (production && !env.APP_URL.startsWith("https://")) err("APP_URL", "HTTPS obligatoire en production");
 
   const whatsappPartial = Boolean(env.WHATSAPP_ACCESS_TOKEN || env.WHATSAPP_PHONE_NUMBER_ID || env.WHATSAPP_VERIFY_TOKEN);
@@ -114,7 +116,7 @@ export function checkEnv(env: Env = getEnv()): EnvIssue[] {
     if (!env.WHATSAPP_PHONE_NUMBER_ID) err("WHATSAPP_PHONE_NUMBER_ID", "WhatsApp partiellement configuré");
     if (!env.WHATSAPP_VERIFY_TOKEN) err("WHATSAPP_VERIFY_TOKEN", "Jeton de vérification du webhook absent");
     if (!env.WHATSAPP_APP_SECRET) err("WHATSAPP_APP_SECRET", "Signature des webhooks non vérifiable : webhooks refusés en production");
-    if (!getApproverPhone()) err("WHATSAPP_APPROVER_PHONE", "Numéro autorisé absent : aucune validation possible");
+    if (!env.WHATSAPP_BUSINESS_NUMBER) warn("WHATSAPP_BUSINESS_NUMBER", "Numéro WhatsApp d'EMA absent : le bouton « Ouvrir WhatsApp » ne pourra pas être affiché aux utilisateurs");
   } else {
     warn("WHATSAPP_ACCESS_TOKEN", "WhatsApp non configuré : les validations se font uniquement dans l'interface");
   }
@@ -153,7 +155,7 @@ export function getConfiguredIntegrations(): {
   return {
     anthropic: Boolean(env.ANTHROPIC_API_KEY),
     microsoft: Boolean(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET && env.MICROSOFT_REDIRECT_URI),
-    whatsapp: Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_VERIFY_TOKEN && getApproverPhone()),
+    whatsapp: Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_VERIFY_TOKEN),
     appSecret: Boolean(env.APP_SECRET && env.APP_SECRET.length >= 32),
     appPassword: Boolean(env.APP_PASSWORD),
   };

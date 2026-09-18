@@ -1,4 +1,4 @@
-import { route, ok, parseBody } from "@/lib/api";
+import { route, ok, parseBody, currentUser } from "@/lib/api";
 import { getSettings, settingsSchema, writeConfig, getCompanies, getRules } from "@/lib/config";
 import { getConfiguredIntegrations } from "@/lib/env";
 import { getOutlookStatus } from "@/integrations/microsoft";
@@ -6,12 +6,12 @@ import { getWhatsappStatus } from "@/integrations/whatsapp";
 import { kvGetJson, kvSetJson } from "@/database/repositories/kv";
 import { z } from "zod";
 
-export const GET = route(async () => {
+export const GET = route(async (_req, _ctx, sessionUser) => {
   const companies = getCompanies();
   return ok({
     settings: getSettings(),
     integrations: getConfiguredIntegrations(),
-    outlook: getOutlookStatus(),
+    outlook: getOutlookStatus(undefined, currentUser(sessionUser).id),
     whatsapp: getWhatsappStatus(),
     counts: { companies: companies.length, rules: getRules().length, companiesWithAssets: companies.filter((c) => c.signaturePath && c.stampPath).length },
     completedSteps: kvGetJson<string[]>("setup.completed_steps", []),

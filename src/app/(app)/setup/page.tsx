@@ -5,11 +5,13 @@ import { getOutlookStatus } from "@/integrations/microsoft";
 import { getWhatsappStatus } from "@/integrations/whatsapp";
 import { kvGetJson } from "@/database/repositories/kv";
 import { getContacts } from "@/lib/config";
+import { requireSessionUser } from "@/security/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function SetupPage({ searchParams }: { searchParams: Promise<{ step?: string; error?: string; connected?: string }> }) {
   const { step, error, connected } = await searchParams;
+  const user = await requireSessionUser();
   const env = getEnv();
   const notice = error ? { tone: "danger" as const, text: `Connexion Outlook refusée : ${error}` } : connected ? { tone: "ok" as const, text: "Outlook connecté. Lancez une synchronisation pour vérifier." } : null;
   return (
@@ -22,7 +24,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
         companies={readConfig("companies")}
         contacts={getContacts()}
         integrations={getConfiguredIntegrations()}
-        outlook={getOutlookStatus()}
+        outlook={getOutlookStatus(undefined, user.id)}
         notice={notice}
         whatsapp={getWhatsappStatus()}
         appUrl={env.APP_URL}

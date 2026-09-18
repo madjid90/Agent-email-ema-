@@ -12,6 +12,7 @@ import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "@/dat
 import type { ActionRow, ApprovalRow } from "@/database/types";
 import { parseJson } from "@/database/types";
 import { getApproverPhone } from "@/lib/env";
+import { whatsappRecipientFor } from "@/database/repositories/users";
 import { getCompanies, getSettings, type Settings } from "@/lib/config";
 import { EmaError } from "@/lib/errors";
 import { nowIso } from "@/lib/ids";
@@ -30,12 +31,26 @@ export interface ApprovalDeps {
   db?: Db;
   client?: WhatsappClient;
   settings?: Settings;
+  /** Numéro explicite (tests, instance historique). Sinon : numéro vérifié du propriétaire de l'action. */
   approverPhone?: string | null;
+  /** Utilisateur identifié par le webhook : ne peut décider que de SES actions. */
+  userId?: string | null;
   now?: () => string;
 }
 
 function resolve(deps: ApprovalDeps): { db: Db; settings: Settings; approver: string | null } {
   return { db: deps.db ?? getDb(), settings: deps.settings ?? getSettings(), approver: deps.approverPhone === undefined ? getApproverPhone() : deps.approverPhone };
+}
+
+/**
+ * Destinataire d'une notification : le numéro WhatsApp vérifié du propriétaire
+ * de l'action. Une action sans propriétaire (données historiques) retombe sur
+ * le numéro explicite ou WHATSAPP_APPROVER_PHONE.
+ */
+function approverFor(action: ActionRow, deps: ApprovalDeps, db: Db): string | null {
+  if (deps.approverPhone !== undefined) return deps.approverPhone;
+  if (action.user_id) return whatsappRecipientFor(action.user_id, db);
+  return getApproverPhone();
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -147,15 +162,16 @@ export function buildApprovalMessageInput(action: ActionRow, approval: ApprovalR
  * rien n'est renvoyé. Ne lève pas : l'échec est enregistré (retenté par le worker).
  */
 export async function notifyPendingApproval(actionId: string, deps: ApprovalDeps = {}): Promise<{ sent: boolean; reason: string; approvalId: string | null }> {
-  const { db, settings, approver } = resolve(deps);
+  const { db, settings } = resolve(deps);
   const action = actionsRepo.getAction(actionId, db);
   if (!action) throw new EmaError("NOT_FOUND", `Action ${actionId} introuvable`);
+  const approver = approverFor(action, deps, db);
   const approval = approvalsRepo.getPendingApprovalForAction(actionId, db);
   if (!approval) return { sent: false, reason: "aucune validation en attente", approvalId: null };
   if (approval.external_message_id) return { sent: false, reason: "notification déjà envoyée", approvalId: approval.id };
   if (settings.approvals.channel !== "whatsapp") return { sent: false, reason: "canal de validation : interface", approvalId: approval.id };
   if (!deps.client && !isWhatsappConfigured()) return { sent: false, reason: "WhatsApp non configuré", approvalId: approval.id };
-  if (!approver) return { sent: false, reason: "WHATSAPP_APPROVER_PHONE non renseigné", approvalId: approval.id };
+  if (!approver) return { sent: false, reason: action.user_id ? "numéro WhatsApp de l'utilisateur non vérifié" : "WHATSAPP_APPROVER_PHONE non renseigné", approvalId: approval.id };
   if (approval.notify_attempts >= MAX_NOTIFY_ATTEMPTS) return { sent: false, reason: "nombre maximal de tentatives atteint", approvalId: approval.id };
 
   const client = deps.client ?? getWhatsappClient();
@@ -225,6 +241,13 @@ export async function handleInboundEvent(event: WhatsappInboundEvent, deps: Appr
     return finish({ handled: false, outcome: "unknown", actionId: null, message: "Approval inexistante" });
   }
   const action = actionsRepo.getAction(approval.action_id, db);
+  // Isolation : un utilisateur identifié ne décide que de SES actions. Une demande
+  // d'un autre compte est traitée comme inexistante, sans révéler son contenu.
+  if (deps.userId && action && action.user_id !== deps.userId) {
+    log.warn("whatsapp decision on another user's action ignored", { userId: deps.userId });
+    await reply(deps, approver, "⚠ Demande de validation introuvable.");
+    return finish({ handled: false, outcome: "unauthorized", actionId: null, message: "Action d'un autre utilisateur" });
+  }
   if (approval.status !== "PENDING") {
     await reply(deps, approver, `ℹ Cette demande a déjà été traitée (${approval.status}).`);
     return finish({ handled: false, outcome: "already_decided", actionId: approval.action_id, message: `Approval déjà ${approval.status}` });

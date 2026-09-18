@@ -8,6 +8,8 @@ import { getSettings } from "@/lib/config";
 import { kvSet } from "@/database/repositories/kv";
 import { getDb } from "@/database/connection";
 import { createConnectedGraphClient, isOutlookConnected, syncInbox } from "@/integrations/microsoft";
+import { listActiveConnections } from "@/database/repositories/connections";
+import { TOKEN_PROVIDER } from "@/integrations/microsoft/token-store";
 import { analyzePendingEmails } from "@/agent/orchestrator";
 import { notifyUnsentApprovals, isWhatsappConfigured } from "@/integrations/whatsapp";
 import { analyzeDocument } from "@/documents/analyze";
@@ -25,13 +27,32 @@ export const scanMailboxTask = (intervalSeconds: number): WorkerTask => ({
   intervalSeconds,
   lockTtlSeconds: Math.max(120, intervalSeconds * 2),
   run: async () => {
-    if (!isOutlookConnected()) {
-      log.debug("scan_mailbox: Outlook non connecté");
-      return;
+    // Une synchronisation PAR boîte connectée : chaque utilisateur avec sa propre
+    // connexion, son propre curseur, ses propres emails. Une boîte en erreur
+    // (token révoqué, Graph indisponible) n'empêche jamais les autres.
+    const connections = listActiveConnections(TOKEN_PROVIDER);
+    let inserted = 0;
+    for (const connection of connections) {
+      const userId = connection.user_id as string;
+      try {
+        const result = await syncInbox(createConnectedGraphClient({ userId }), { userId });
+        inserted += result.inserted;
+        if (result.inserted > 0 || result.errors.length > 0) log.info("scan_mailbox done", { userId, inserted: result.inserted, attachments: result.attachments, pages: result.pages, errors: result.errors.length });
+      } catch (err) {
+        log.warn("scan_mailbox failed for user", { userId, message: err instanceof Error ? err.message : String(err) });
+      }
     }
-    const result = await syncInbox(createConnectedGraphClient());
-    if (result.inserted > 0 || result.errors.length > 0) log.info("scan_mailbox done", { inserted: result.inserted, attachments: result.attachments, pages: result.pages, errors: result.errors.length });
-    if (result.inserted > 0) await runAnalysis(result.inserted);
+    // Instance historique (connexion sans propriétaire) : comportement d'origine.
+    if (connections.length === 0) {
+      if (!isOutlookConnected()) {
+        log.debug("scan_mailbox: aucune boîte connectée");
+        return;
+      }
+      const result = await syncInbox(createConnectedGraphClient());
+      inserted += result.inserted;
+      if (result.inserted > 0 || result.errors.length > 0) log.info("scan_mailbox done", { inserted: result.inserted, attachments: result.attachments, pages: result.pages, errors: result.errors.length });
+    }
+    if (inserted > 0) await runAnalysis(inserted);
   },
 });
 

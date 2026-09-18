@@ -7,6 +7,17 @@
 - **Actions irréversibles** : envoi d'email, signature de document, demande de paiement.
 - **Données personnelles** : tout ce qui est dans la boîte mail reste sur le VPS du client.
 
+## 1 bis. Identité et isolation entre comptes (18/09/2026)
+
+- **Identité serveur uniquement** : web → cookie de session signé (`user_id`), WhatsApp → numéro E.164 vérifié dans `users`, analyse → `emails.user_id`. Jamais un paramètre de requête, jamais le modèle.
+- **Isolation** : chaque lecture est filtrée par `user_id` (routes, pages, tools via `assertOwned`) ; un identifiant appartenant à un autre compte est traité comme inexistant (404), sans révéler son contenu. Chaque envoi utilise la connexion Microsoft du propriétaire de l'action (`createConnectedGraphClient({ userId })`). Un appel non scopé n'obtient une connexion que si l'instance n'en a qu'une seule — jamais « la première venue ».
+- **Numéro inconnu** : aucun appel Microsoft, aucune donnée, un message d'onboarding limité à 3 par heure et par numéro, journal sans le numéro complet.
+- **Validation WhatsApp** : un utilisateur ne peut valider que SES actions (`approvals.ts`, `router.ts`) ; une demande d'un autre compte est « introuvable ».
+- **Tokens** : `connections.encrypted` (AES-256-GCM, clé dérivée d'`APP_SECRET`), jamais dans le frontend, jamais dans `localStorage`, jamais journalisés. Refresh refusé → `status = revoked`, code `MICROSOFT_RECONNECT`, message « Votre connexion Microsoft a expiré ou a été révoquée. Reconnectez Outlook. »
+- **OAuth** : état anti-CSRF à usage unique (10 min) mémorisant l'utilisateur qui a lancé le flux ; le callback n'attribue les tokens qu'à lui. Permissions déléguées uniquement.
+- **Comptes** : mots de passe scrypt (sel aléatoire, 12 caractères minimum), connexion limitée (5 / 15 min), inscription limitée (5 / 15 min) et soumise à `ALLOW_SIGNUP` après le premier compte.
+- **Audit** : `history.user_id` sur les événements d'un compte (connexion, activation WhatsApp, actions, envois).
+
 ## 2. Séparation instructions / contenu
 
 - Les instructions système viennent uniquement de `src/agent/ema.md` et `src/agent/prompts/*` (fichiers du dépôt).
@@ -23,7 +34,7 @@
 
 - Uniquement dans `.env` (jamais dans `config/`, jamais dans SQLite en clair, jamais dans git).
 - `src/lib/env.ts` valide l'env avec zod au démarrage ; les valeurs ne sont jamais logguées.
-- Tokens OAuth Microsoft : chiffrés AES-256-GCM (`src/security/crypto.ts`) avec une clé dérivée d'`APP_SECRET` (scrypt) avant stockage dans `oauth_tokens`.
+- Tokens OAuth Microsoft : chiffrés AES-256-GCM (`src/security/crypto.ts`) avec une clé dérivée d'`APP_SECRET` (scrypt) avant stockage dans `connections` (une ligne par utilisateur).
 - Claude ne reçoit jamais : secrets, tokens, chemins de fichiers de signature/tampon, images de signature/tampon, base64 de PDF. Pour une signature, il ne manipule que `company_id` ; la résolution `company_id → private/signatures/*.png` se fait dans `createSignedCopy()` **après** la transition `APPROVED → EXECUTING`. Aucun tool `apply_signature` / `apply_stamp` n'est enregistré.
 - Les erreurs renvoyées à Claude ou à l'UI sont assainies (`code` + `message` court).
 

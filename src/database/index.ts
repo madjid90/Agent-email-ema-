@@ -9,6 +9,8 @@ export * as followups from "./repositories/followups";
 export * as documents from "./repositories/documents";
 export * as history from "./repositories/history";
 export * as tokens from "./repositories/tokens";
+export * as users from "./repositories/users";
+export * as connections from "./repositories/connections";
 export * as kv from "./repositories/kv";
 export * as locks from "./repositories/locks";
 export * as chat from "./repositories/chat";

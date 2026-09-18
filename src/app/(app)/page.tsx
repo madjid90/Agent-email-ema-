@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, Empty, Stat, CategoryBadge, UrgencyBadge } from "@/components/ui";
 import { getDb } from "@/database/connection";
+import { requireSessionUser } from "@/security/auth";
 import { countEmails } from "@/database/repositories/emails";
 import { analysisStats, listEmailsWithAnalysis } from "@/database/repositories/analyses";
 import { listActions } from "@/database/repositories/actions";
@@ -36,28 +37,29 @@ function analyzedByCategory(list: { category: string | null }[], category: strin
   return list.filter((e) => e.category === category).length;
 }
 
-function pendingFinancial(db: ReturnType<typeof getDb>): number {
-  return listActions({ status: "WAITING_APPROVAL", limit: 200 }, db).filter((a) => a.type === "forward_email" || a.type === "payment_request" || a.type === "deposit_request").length;
+function pendingFinancial(db: ReturnType<typeof getDb>, userId: string): number {
+  return listActions({ status: "WAITING_APPROVAL", limit: 200, userId }, db).filter((a) => a.type === "forward_email" || a.type === "payment_request" || a.type === "deposit_request").length;
 }
 
-export default function TodayPage() {
+export default async function TodayPage() {
   const db = getDb();
+  const user = await requireSessionUser(db);
   const settings = getSettings();
   const tz = settings.company.timezone;
   const since = startOfTodayIso();
-  const received = countEmails({ since }, db);
+  const received = countEmails({ since, userId: user.id }, db);
   const stats = analysisStats(since, db);
   const usage = llmUsageSince(since, db);
   const docs = documentStats(since, db);
-  const financialPending = pendingFinancial(db);
-  const pending = listActions({ status: "WAITING_APPROVAL", limit: 50 }, db);
+  const financialPending = pendingFinancial(db, user.id);
+  const pending = listActions({ status: "WAITING_APPROVAL", limit: 50, userId: user.id }, db);
   const bounds = dayBounds(tz);
   const followupCounts = followupStats(bounds.start, bounds.end, db);
-  const followupsToday = listFollowups({ status: ["SCHEDULED", "CHECK_FAILED", "CHECKING", "REMINDED"], dueBefore: bounds.end, limit: 20 }, db);
-  const followupsWaiting = listFollowups({ status: "WAITING_APPROVAL", limit: 20 }, db);
-  const followupsAnswered = listFollowups({ status: "RESPONSE_RECEIVED", limit: 20 }, db).filter((f) => (f.updated_at ?? f.created_at) >= bounds.start);
-  const followupsAttention = listFollowups({ status: ["MAX_ATTEMPTS_REACHED", "REVIEW_REQUIRED", "FAILED"], limit: 20 }, db);
-  const analyzed = listEmailsWithAnalysis({ since, limit: 200 }, db).filter((e) => e.category !== null);
+  const followupsToday = listFollowups({ userId: user.id, status: ["SCHEDULED", "CHECK_FAILED", "CHECKING", "REMINDED"], dueBefore: bounds.end, limit: 20 }, db);
+  const followupsWaiting = listFollowups({ userId: user.id, status: "WAITING_APPROVAL", limit: 20 }, db);
+  const followupsAnswered = listFollowups({ userId: user.id, status: "RESPONSE_RECEIVED", limit: 20 }, db).filter((f) => (f.updated_at ?? f.created_at) >= bounds.start);
+  const followupsAttention = listFollowups({ userId: user.id, status: ["MAX_ATTEMPTS_REACHED", "REVIEW_REQUIRED", "FAILED"], limit: 20 }, db);
+  const analyzed = listEmailsWithAnalysis({ since, limit: 200, userId: user.id }, db).filter((e) => e.category !== null);
   const attention = analyzed.filter((e) => e.urgency === "HIGH" || e.urgency === "CRITICAL" || e.requires_human_review === 1 || e.needs_reply === 1);
   const priorities = analyzed
     .filter((e) => e.recommended_action && e.recommended_action !== "none" && e.recommended_action !== "archive")

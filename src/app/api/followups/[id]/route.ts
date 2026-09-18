@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { route, ok, parseBody } from "@/lib/api";
+import { route, ok, parseBody, currentUser, ownedOr404 } from "@/lib/api";
 import { getFollowup } from "@/database/repositories/followups";
-import { EmaError } from "@/lib/errors";
 import { cancelFollowup, completeReminder, postponeFollowup, processFollowup } from "@/followups/service";
 
 /**
@@ -9,11 +8,10 @@ import { cancelFollowup, completeReminder, postponeFollowup, processFollowup } f
  * rappel comme traité, ou traiter l'échéance immédiatement (vérification
  * Outlook puis brouillon soumis à validation — jamais d'envoi direct).
  */
-export const PATCH = route(async (req, ctx: { params: Promise<{ id: string }> }) => {
+export const PATCH = route(async (req, ctx: { params: Promise<{ id: string }> }, sessionUser) => {
   const { id } = await ctx.params;
   const body = await parseBody(req, z.object({ action: z.enum(["cancel", "postpone", "prepare_now", "done"]), days: z.number().int().min(1).max(60).default(3) }));
-  const f = getFollowup(id);
-  if (!f) throw new EmaError("NOT_FOUND", `Relance ${id} introuvable`);
+  ownedOr404(getFollowup(id), currentUser(sessionUser), `Relance ${id}`);
 
   if (body.action === "cancel") {
     return ok({ followup: cancelFollowup(id, "Annulée depuis l'interface", { actor: "user" }) });

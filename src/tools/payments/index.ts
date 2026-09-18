@@ -53,7 +53,7 @@ export const preparePaymentRequest = defineTool({
         payload: { email_id: input.email_id, to: [to], subject: `Règlement — ${input.supplier} — ${input.subject}`, body, supplier: input.supplier, amount: input.amount, currency: input.currency, due_date: input.due_date, project: null },
         sourceEmailId: input.email_id,
       },
-      { db: ctx.db, settings: ctx.settings },
+      { db: ctx.db, settings: ctx.settings, userId: ctx.userId },
     );
     return { action_id: a.id, status: a.status, requires_approval: true, draft: body };
   },
@@ -84,7 +84,7 @@ export const prepareDepositRequest = defineTool({
         payload: { email_id: input.email_id, to: [to], subject: `Acompte — ${input.project}`, body, supplier: input.supplier, amount: input.amount, currency: input.currency, due_date: null, project: input.project },
         sourceEmailId: input.email_id,
       },
-      { db: ctx.db, settings: ctx.settings },
+      { db: ctx.db, settings: ctx.settings, userId: ctx.userId },
     );
     return { action_id: a.id, status: a.status, requires_approval: true, draft: body };
   },

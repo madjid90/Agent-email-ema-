@@ -85,8 +85,8 @@ export function readRefs(json: string | null): ConversationRef[] {
 }
 
 /** Dernières références présentées sur ce canal (contexte multi-tours). */
-export function lastRefs(channel: ChatChannel, db: Db = getDb()): ConversationRef[] {
-  return readRefs(chatRepo.lastMessageWithRefs(channel, db)?.refs ?? null);
+export function lastRefs(channel: ChatChannel, db: Db = getDb(), userId?: string | null): ConversationRef[] {
+  return readRefs(chatRepo.lastMessageWithRefs(channel, db, userId)?.refs ?? null);
 }
 
 /** Bloc de contexte injecté dans le prompt : identifiants explicites, jamais de contenu sensible. */

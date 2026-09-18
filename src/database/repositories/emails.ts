@@ -4,6 +4,8 @@ import type { EmailRow, EmailStatus } from "../types";
 import { newId, nowIso } from "@/lib/ids";
 
 export interface NewEmail {
+  /** Propriétaire de la boîte (toujours fourni par la synchronisation). */
+  userId?: string | null;
   graphId: string;
   threadId?: string | null;
   internetMessageId?: string | null;
@@ -28,10 +30,11 @@ export function insertEmail(input: NewEmail, db: Db = getDb()): EmailRow {
   const id = newId("eml");
   const now = nowIso();
   db.prepare(
-    `INSERT INTO emails (id, graph_id, thread_id, internet_message_id, direction, sender_name, sender_email, to_recipients, cc_recipients, subject, body_preview, body_text, received_at, sent_at, has_attachments, is_read, web_link, folder, status, created_at, updated_at)
-     VALUES (@id, @graph_id, @thread_id, @internet_message_id, @direction, @sender_name, @sender_email, @to_recipients, @cc_recipients, @subject, @body_preview, @body_text, @received_at, @sent_at, @has_attachments, @is_read, @web_link, @folder, @status, @now, @now)`,
+    `INSERT INTO emails (id, user_id, graph_id, thread_id, internet_message_id, direction, sender_name, sender_email, to_recipients, cc_recipients, subject, body_preview, body_text, received_at, sent_at, has_attachments, is_read, web_link, folder, status, created_at, updated_at)
+     VALUES (@id, @user_id, @graph_id, @thread_id, @internet_message_id, @direction, @sender_name, @sender_email, @to_recipients, @cc_recipients, @subject, @body_preview, @body_text, @received_at, @sent_at, @has_attachments, @is_read, @web_link, @folder, @status, @now, @now)`,
   ).run({
     id,
+    user_id: input.userId ?? null,
     graph_id: input.graphId,
     thread_id: input.threadId ?? null,
     internet_message_id: input.internetMessageId ?? null,
@@ -67,9 +70,18 @@ export function getEmailByInternetMessageId(internetMessageId: string, db: Db = 
   return db.prepare("SELECT * FROM emails WHERE internet_message_id = ? LIMIT 1").get(internetMessageId) as EmailRow | undefined;
 }
 
-export function listEmails(opts: { status?: EmailStatus; limit?: number; since?: string } = {}, db: Db = getDb()): EmailRow[] {
+/** Filtre de propriétaire : `userId` fourni → uniquement les lignes de cet utilisateur. */
+function ownerClause(userId: string | undefined, clauses: string[], params: Record<string, unknown>): void {
+  if (userId) {
+    clauses.push("user_id = @user_id");
+    params.user_id = userId;
+  }
+}
+
+export function listEmails(opts: { status?: EmailStatus; limit?: number; since?: string; userId?: string } = {}, db: Db = getDb()): EmailRow[] {
   const clauses: string[] = [];
   const params: Record<string, unknown> = { limit: opts.limit ?? 50 };
+  ownerClause(opts.userId, clauses, params);
   if (opts.status) {
     clauses.push("status = @status");
     params.status = opts.status;
@@ -82,7 +94,8 @@ export function listEmails(opts: { status?: EmailStatus; limit?: number; since?:
   return db.prepare(`SELECT * FROM emails ${where} ORDER BY received_at DESC LIMIT @limit`).all(params) as EmailRow[];
 }
 
-export function listThread(threadId: string, db: Db = getDb()): EmailRow[] {
+export function listThread(threadId: string, db: Db = getDb(), userId?: string): EmailRow[] {
+  if (userId) return db.prepare("SELECT * FROM emails WHERE thread_id = ? AND user_id = ? ORDER BY received_at ASC").all(threadId, userId) as EmailRow[];
   return db.prepare("SELECT * FROM emails WHERE thread_id = ? ORDER BY received_at ASC").all(threadId) as EmailRow[];
 }
 
@@ -123,14 +136,17 @@ export function touchEmail(id: string, patch: { isRead?: boolean; folder?: strin
   db.prepare(`UPDATE emails SET ${sets.join(", ")} WHERE id = @id`).run(params);
 }
 
-export function latestReceivedAt(db: Db = getDb()): string | null {
-  const row = db.prepare("SELECT MAX(received_at) AS m FROM emails WHERE direction = 'inbound' AND status != 'CONTEXT'").get() as { m: string | null };
+export function latestReceivedAt(db: Db = getDb(), userId?: string): string | null {
+  const row = (userId
+    ? db.prepare("SELECT MAX(received_at) AS m FROM emails WHERE direction = 'inbound' AND status != 'CONTEXT' AND user_id = ?").get(userId)
+    : db.prepare("SELECT MAX(received_at) AS m FROM emails WHERE direction = 'inbound' AND status != 'CONTEXT'").get()) as { m: string | null };
   return row.m;
 }
 
-export function countEmails(opts: { since?: string; status?: EmailStatus } = {}, db: Db = getDb()): number {
+export function countEmails(opts: { since?: string; status?: EmailStatus; userId?: string } = {}, db: Db = getDb()): number {
   const clauses: string[] = ["status != 'CONTEXT'"];
   const params: Record<string, unknown> = {};
+  ownerClause(opts.userId, clauses, params);
   if (opts.since) {
     clauses.push("received_at >= @since");
     params.since = opts.since;

@@ -1,10 +1,9 @@
 import { z } from "zod";
-import { defineTool, emailSummarySchema } from "../types";
+import { defineTool, emailSummarySchema, assertOwned } from "../types";
 import * as emailsRepo from "@/database/repositories/emails";
 import { listEmailsWithAnalysis } from "@/database/repositories/analyses";
 import { describeAnalysis } from "@/agent/chat";
 import { parseJson } from "@/database/types";
-import { EmaError } from "@/lib/errors";
 import { analysisStats } from "@/database/repositories/analyses";
 import { listActions } from "@/database/repositories/actions";
 import { searchDocuments } from "@/database/repositories/documents";
@@ -19,7 +18,7 @@ export const getEmailAnalysis = defineTool({
   input: z.object({ email_id: z.string() }),
   output: z.record(z.string(), z.unknown()),
   handler: async (input, ctx) => {
-    if (!emailsRepo.getEmail(input.email_id, ctx.db)) throw new EmaError("NOT_FOUND", `Email ${input.email_id} introuvable`);
+    assertOwned(emailsRepo.getEmail(input.email_id, ctx.db), ctx, `Email ${input.email_id}`);
     const a = describeAnalysis(input.email_id, ctx.db);
     return a ?? { email_id: input.email_id, analyzed: false, message: "Cet email n'a pas encore été analysé" };
   },
@@ -42,7 +41,7 @@ export const listRecentEmails = defineTool({
     }),
   ),
   handler: async (input, ctx) => {
-    const rows = listEmailsWithAnalysis({ limit: 200, since: input.since }, ctx.db)
+    const rows = listEmailsWithAnalysis({ limit: 200, since: input.since, userId: ctx.userId ?? undefined }, ctx.db)
       .filter((r) => (input.category ? r.category === input.category : true))
       .filter((r) => (input.needs_reply === undefined ? true : (r.needs_reply === 1) === input.needs_reply))
       .slice(0, input.max);
@@ -85,8 +84,8 @@ export const getTodaySummary = defineTool({
   handler: async (input, ctx) => {
     const since = input.since ?? startOfTodayIso();
     const stats = analysisStats(since, ctx.db);
-    const pending = listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 20 }, ctx.db);
-    const quotes = searchDocuments({ docType: "QUOTE", limit: 10 }, ctx.db).filter((d) => d.signed_document_id === null);
+    const pending = listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 20, userId: ctx.userId ?? undefined }, ctx.db);
+    const quotes = searchDocuments({ docType: "QUOTE", limit: 10, userId: ctx.userId ?? undefined }, ctx.db).filter((d) => d.signed_document_id === null);
     const emails = listEmailsWithAnalysis({ since, limit: 50 }, ctx.db);
     return {
       since,

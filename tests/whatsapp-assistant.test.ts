@@ -118,9 +118,10 @@ describe("Routage WhatsApp : autorisation, dédoublonnage, classement", () => {
     const wa = fakeWhatsapp();
     const anthropic = fakeAnthropic([], [textTurn("ne devrait jamais répondre")]);
     const r = await handleWhatsappEvent(textEvent("Quels sont mes emails urgents ?", INTRUDER), deps({ db, wa, anthropic }));
-    expect(r.outcome).toBe("unauthorized");
+    expect(r.outcome).toBe("unknown_user");
     expect(anthropic.chatCalls).toHaveLength(0);
-    expect(wa.sent()).toHaveLength(0);
+    // Un numéro inconnu ne reçoit qu'un message d'onboarding, jamais une donnée.
+    expect(wa.sent().length).toBeLessThanOrEqual(1);
     expect(actions.listActions({}, db)).toHaveLength(0);
     expect(chat.listChatMessages(50, db, "WHATSAPP")).toHaveLength(0);
   });

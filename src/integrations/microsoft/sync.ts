@@ -25,6 +25,8 @@ export const KV = {
 
 export interface SyncOptions {
   db?: Db;
+  /** Boîte synchronisée : les emails et le curseur sont rattachés à cet utilisateur. */
+  userId?: string | null;
   /** Nombre maximal de nouveaux emails ingérés par passage. */
   limit?: number;
   /** Première synchronisation : ne remonter que les N derniers jours (0 = tout). */
@@ -50,10 +52,12 @@ export async function syncInbox(client: GraphClient, opts: SyncOptions = {}): Pr
   const maxBytes = opts.maxAttachmentBytes ?? Math.round(env.ATTACHMENT_MAX_MB * 1024 * 1024);
   const withAttachments = opts.withAttachments ?? true;
   const now = opts.now ?? (() => new Date());
-  const accountEmail = loadTokenSet(db)?.accountEmail ?? null;
+  const userId = opts.userId ?? null;
+  const accountEmail = loadTokenSet(db, opts.userId)?.accountEmail ?? null;
+  const K = syncKeys(userId);
 
-  const result: OutlookSyncResult = { inserted: 0, updated: 0, skipped: 0, attachments: 0, pages: 0, reachedLimit: false, lastEmailAt: kvGet(KV.lastEmailAt, db), errors: [] };
-  let cursor = kvGet(KV.cursor, db) || null;
+  const result: OutlookSyncResult = { inserted: 0, updated: 0, skipped: 0, attachments: 0, pages: 0, reachedLimit: false, lastEmailAt: kvGet(K.lastEmailAt, db), errors: [] };
+  let cursor = kvGet(K.cursor, db) || null;
   const initialSince = !cursor && initialDays > 0 ? new Date(now().getTime() - initialDays * 86_400_000).toISOString() : null;
   const pageSize = Math.max(1, Math.min(limit, 50));
 
@@ -76,7 +80,7 @@ export async function syncInbox(client: GraphClient, opts: SyncOptions = {}): Pr
           }
           continue;
         }
-        const row = emailsRepo.insertEmail(toNewEmail(m, { accountEmail, status: "NEW", direction: "inbound" }), db);
+        const row = emailsRepo.insertEmail({ ...toNewEmail(m, { accountEmail, status: "NEW", direction: "inbound" }), userId }, db);
         result.inserted++;
         if (!result.lastEmailAt || row.received_at > result.lastEmailAt) result.lastEmailAt = row.received_at;
         if (withAttachments && row.has_attachments === 1) {
@@ -91,7 +95,7 @@ export async function syncInbox(client: GraphClient, opts: SyncOptions = {}): Pr
       const next = page.nextLink ?? page.deltaLink;
       if (next) {
         cursor = next;
-        kvSet(KV.cursor, next, db);
+        kvSet(K.cursor, next, db);
       }
       if (page.deltaLink) break; // fin du delta : le prochain passage repartira du deltaLink
       if (!page.nextLink) break;
@@ -100,21 +104,28 @@ export async function syncInbox(client: GraphClient, opts: SyncOptions = {}): Pr
         break;
       }
     }
-    kvSet(KV.lastSyncError, "", db);
+    kvSet(K.lastSyncError, "", db);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     result.errors.push(message);
-    kvSet(KV.lastSyncError, message, db);
-    log.error("sync failed", { message, pages: result.pages, inserted: result.inserted });
+    kvSet(K.lastSyncError, message, db);
+    log.error("sync failed", { userId, message, pages: result.pages, inserted: result.inserted });
   }
 
-  kvSet(KV.lastSyncAt, nowIso(), db);
-  if (result.lastEmailAt) kvSet(KV.lastEmailAt, result.lastEmailAt, db);
-  kvSetJson(KV.lastSyncResult, result, db);
+  kvSet(K.lastSyncAt, nowIso(), db);
+  if (result.lastEmailAt) kvSet(K.lastEmailAt, result.lastEmailAt, db);
+  kvSetJson(K.lastSyncResult, result, db);
   if (result.inserted > 0) {
-    logHistory({ eventType: "outlook.sync", message: `${result.inserted} nouvel(s) email(s) synchronisé(s)${result.attachments ? `, ${result.attachments} pièce(s) jointe(s)` : ""}`, actor: "worker", details: { pages: result.pages, reachedLimit: result.reachedLimit } }, db);
+    logHistory({ eventType: "outlook.sync", message: `${result.inserted} nouvel(s) email(s) synchronisé(s)${result.attachments ? `, ${result.attachments} pièce(s) jointe(s)` : ""}`, actor: "worker", userId, details: { pages: result.pages, reachedLimit: result.reachedLimit } }, db);
   }
   return result;
+}
+
+/** Clés d'état de synchronisation : suffixées par utilisateur (héritage sans suffixe). */
+export function syncKeys(userId: string | null): typeof KV {
+  if (!userId) return KV;
+  const suffix = `:${userId}`;
+  return { cursor: `${KV.cursor}${suffix}`, lastSyncAt: `${KV.lastSyncAt}${suffix}`, lastSyncResult: `${KV.lastSyncResult}${suffix}`, lastSyncError: `${KV.lastSyncError}${suffix}`, lastEmailAt: `${KV.lastEmailAt}${suffix}` } as typeof KV;
 }
 
 export interface SyncState {
@@ -125,13 +136,14 @@ export interface SyncState {
   hasCursor: boolean;
 }
 
-export function getSyncState(db: Db = getDb()): SyncState {
+export function getSyncState(db: Db = getDb(), userId: string | null = null): SyncState {
+  const K = syncKeys(userId);
   return {
-    lastSyncAt: kvGet(KV.lastSyncAt, db) || null,
-    lastEmailAt: kvGet(KV.lastEmailAt, db) || null,
-    lastSyncError: kvGet(KV.lastSyncError, db) || null,
-    lastResult: kvGetJson<OutlookSyncResult | null>(KV.lastSyncResult, null, db),
-    hasCursor: Boolean(kvGet(KV.cursor, db)),
+    lastSyncAt: kvGet(K.lastSyncAt, db) || null,
+    lastEmailAt: kvGet(K.lastEmailAt, db) || null,
+    lastSyncError: kvGet(K.lastSyncError, db) || null,
+    lastResult: kvGetJson<OutlookSyncResult | null>(K.lastSyncResult, null, db),
+    hasCursor: Boolean(kvGet(K.cursor, db)),
   };
 }
 
@@ -140,22 +152,22 @@ export function getSyncState(db: Db = getDb()): SyncState {
  * avec le statut CONTEXT (jamais traités comme nouveaux). Renvoie le thread
  * complet trié, borné à `max` messages.
  */
-export async function importConversation(client: GraphClient, conversationId: string, opts: { db?: Db; max?: number } = {}): Promise<EmailRow[]> {
+export async function importConversation(client: GraphClient, conversationId: string, opts: { db?: Db; max?: number; userId?: string | null } = {}): Promise<EmailRow[]> {
   const db = opts.db ?? getDb();
   const max = opts.max ?? 30;
-  const accountEmail = loadTokenSet(db)?.accountEmail ?? null;
+  const accountEmail = loadTokenSet(db, opts.userId)?.accountEmail ?? null;
   const messages = await listConversation(client, conversationId, max);
-  for (const m of messages) upsertContextMessage(m, accountEmail, db);
-  return emailsRepo.listThread(conversationId, db).slice(-max);
+  for (const m of messages) upsertContextMessage(m, accountEmail, db, opts.userId);
+  return emailsRepo.listThread(conversationId, db, opts.userId ?? undefined).slice(-max);
 }
 
 /** Enregistre un message Graph comme contexte s'il est inconnu ; renvoie la ligne. */
-export function upsertContextMessage(m: GraphMessage, accountEmail: string | null, db: Db = getDb()): EmailRow {
+export function upsertContextMessage(m: GraphMessage, accountEmail: string | null, db: Db = getDb(), userId?: string | null): EmailRow {
   const existing = emailsRepo.getEmailByGraphId(m.id, db);
   if (existing) return existing;
   if (m.internetMessageId) {
     const byInternet = emailsRepo.getEmailByInternetMessageId(m.internetMessageId, db);
     if (byInternet) return byInternet;
   }
-  return emailsRepo.insertEmail(toNewEmail(m, { accountEmail, status: "CONTEXT" }), db);
+  return emailsRepo.insertEmail({ ...toNewEmail(m, { accountEmail, status: "CONTEXT" }), userId: userId ?? null }, db);
 }

@@ -4,6 +4,8 @@ import type { ActionRow, ActionStatus, RiskLevel } from "../types";
 import { newId, nowIso } from "@/lib/ids";
 
 export interface NewActionRow {
+  /** Propriétaire ; à défaut, hérité de l'email source. */
+  userId?: string | null;
   type: string;
   title: string;
   sourceEmailId?: string | null;
@@ -15,13 +17,20 @@ export interface NewActionRow {
   requiresApproval: boolean;
 }
 
+function ownerOfEmail(emailId: string | null | undefined, db: Db): string | null {
+  if (!emailId) return null;
+  const row = db.prepare("SELECT user_id FROM emails WHERE id = ?").get(emailId) as { user_id: string | null } | undefined;
+  return row?.user_id ?? null;
+}
+
 export function insertAction(input: NewActionRow, db: Db = getDb()): ActionRow {
   const id = newId("act");
   db.prepare(
-    `INSERT INTO actions (id, type, source_email_id, company_id, document_id, payload, status, risk_level, requires_approval, title, created_at)
-     VALUES (@id, @type, @source_email_id, @company_id, @document_id, @payload, @status, @risk_level, @requires_approval, @title, @created_at)`,
+    `INSERT INTO actions (id, user_id, type, source_email_id, company_id, document_id, payload, status, risk_level, requires_approval, title, created_at)
+     VALUES (@id, @user_id, @type, @source_email_id, @company_id, @document_id, @payload, @status, @risk_level, @requires_approval, @title, @created_at)`,
   ).run({
     id,
+    user_id: input.userId ?? ownerOfEmail(input.sourceEmailId, db),
     type: input.type,
     source_email_id: input.sourceEmailId ?? null,
     company_id: input.companyId ?? null,
@@ -40,9 +49,13 @@ export function getAction(id: string, db: Db = getDb()): ActionRow | undefined {
   return db.prepare("SELECT * FROM actions WHERE id = ?").get(id) as ActionRow | undefined;
 }
 
-export function listActions(opts: { status?: ActionStatus | ActionStatus[]; limit?: number; since?: string } = {}, db: Db = getDb()): ActionRow[] {
+export function listActions(opts: { status?: ActionStatus | ActionStatus[]; limit?: number; since?: string; userId?: string } = {}, db: Db = getDb()): ActionRow[] {
   const clauses: string[] = [];
   const params: Record<string, unknown> = { limit: opts.limit ?? 100 };
+  if (opts.userId) {
+    clauses.push("user_id = @user_id");
+    params.user_id = opts.userId;
+  }
   if (opts.status) {
     const statuses = Array.isArray(opts.status) ? opts.status : [opts.status];
     clauses.push(`status IN (${statuses.map((_, i) => `@s${i}`).join(",")})`);
@@ -100,6 +113,6 @@ export function listStaleActions(status: ActionStatus, olderThanIso: string, db:
     .all(status, olderThanIso) as ActionRow[];
 }
 
-export function countActions(opts: { status?: ActionStatus | ActionStatus[]; since?: string } = {}, db: Db = getDb()): number {
+export function countActions(opts: { status?: ActionStatus | ActionStatus[]; since?: string; userId?: string } = {}, db: Db = getDb()): number {
   return listActions({ ...opts, limit: 100000 }, db).length;
 }

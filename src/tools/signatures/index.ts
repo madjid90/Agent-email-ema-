@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineTool, actionRefSchema } from "../types";
+import { defineTool, actionRefSchema, assertOwned } from "../types";
 import * as documentsRepo from "@/database/repositories/documents";
 import * as actionsRepo from "@/database/repositories/actions";
 import { EmaError } from "@/lib/errors";
@@ -19,9 +19,9 @@ export const prepareSignedDocument = defineTool({
   input: z.object({ document_id: z.string(), company_id: z.string().describe("Identifiant d'une société configurée") }),
   output: actionRefSchema.extend({ prepared: z.boolean(), reasons: z.array(z.string()), warnings: z.array(z.string()) }),
   handler: async (input, ctx) => {
-    if (!documentsRepo.getDocument(input.document_id, ctx.db)) throw new EmaError("NOT_FOUND", `Document ${input.document_id} introuvable`);
+    assertOwned(documentsRepo.getDocument(input.document_id, ctx.db), ctx, `Document ${input.document_id}`);
     if (!ctx.companies.some((c) => c.id === input.company_id)) throw new EmaError("VALIDATION", `Société inconnue : ${input.company_id}`);
-    const r = prepareQuoteSignature(input.document_id, input.company_id, { db: ctx.db, settings: ctx.settings, companies: ctx.companies, actor: ctx.mode === "chat" ? "user" : "ema" });
+    const r = prepareQuoteSignature(input.document_id, input.company_id, { db: ctx.db, settings: ctx.settings, companies: ctx.companies, userId: ctx.userId, actor: ctx.mode === "chat" ? "user" : "ema" });
     if (!r.actionId) return { action_id: "", status: "NOT_PROPOSED", requires_approval: true, prepared: false, reasons: r.readiness.reasons, warnings: r.readiness.warnings };
     const a = actionsRepo.getAction(r.actionId, ctx.db);
     return { action_id: r.actionId, status: a?.status ?? "WAITING_APPROVAL", requires_approval: true, prepared: true, reasons: [], warnings: r.readiness.warnings };

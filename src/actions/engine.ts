@@ -41,6 +41,8 @@ export function listExecutorTypes(): ActionType[] {
 export interface EngineOptions {
   db?: Db;
   settings?: Settings;
+  /** Propriétaire de l'action (session, WhatsApp) ; à défaut, hérité de l'email source. */
+  userId?: string | null;
 }
 
 function resolve(opts: EngineOptions): { db: Db; settings: Settings } {
@@ -65,6 +67,7 @@ export function proposeAction<T extends ActionType>(input: ProposeActionInput<T>
 
   const row = actionsRepo.insertAction(
     {
+      userId: opts.userId ?? null,
       type,
       title: input.title,
       sourceEmailId: input.sourceEmailId ?? null,
@@ -77,7 +80,7 @@ export function proposeAction<T extends ActionType>(input: ProposeActionInput<T>
     },
     db,
   );
-  logHistory({ eventType: "action.proposed", message: `Action proposée : ${input.title}`, actor: input.actor ?? "ema", actionId: row.id, emailId: row.source_email_id, details: { type, risk } }, db);
+  logHistory({ eventType: "action.proposed", message: `Action proposée : ${input.title}`, actor: input.actor ?? "ema", actionId: row.id, emailId: row.source_email_id, userId: row.user_id, details: { type, risk } }, db);
 
   const extra = initialStatus === "APPROVED" ? { approved_at: nowIso() } : {};
   actionsRepo.transitionAction(row.id, "PROPOSED", initialStatus, extra, db);
@@ -258,6 +261,7 @@ export async function executeAction(actionId: string, opts: EngineOptions = {}):
   try {
     const result = await executor.execute(payload, {
       actionId,
+      userId: action.user_id,
       companyId: action.company_id,
       documentId: action.document_id,
       sourceEmailId: action.source_email_id,

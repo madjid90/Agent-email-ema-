@@ -1,10 +1,12 @@
-import { route, ok } from "@/lib/api";
+import { route, ok, currentUser } from "@/lib/api";
 import { searchDocuments } from "@/database/repositories/documents";
 
-export const GET = route(async (req) => {
+export const GET = route(async (req, _ctx, sessionUser) => {
+  const user = currentUser(sessionUser);
   const p = new URL(req.url).searchParams;
   return ok(
     searchDocuments({
+      userId: user.id,
       query: p.get("q") ?? undefined,
       supplier: p.get("supplier") ?? undefined,
       invoiceNumber: p.get("invoice") ?? undefined,

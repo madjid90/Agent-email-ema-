@@ -16,6 +16,10 @@ export type EmaErrorCode =
   | "INVALID_TRANSITION"
   /** Envoi transmis à Microsoft sans réponse exploitable : résultat inconnu. */
   | "DELIVERY_AMBIGUOUS"
+  /** Connexion Microsoft absente, expirée ou révoquée : l'utilisateur doit reconnecter Outlook. */
+  | "MICROSOFT_RECONNECT"
+  /** Numéro WhatsApp inconnu d'EMA : aucune donnée, aucun appel Microsoft. */
+  | "UNKNOWN_USER"
   | "INTERNAL";
 
 export class EmaError extends Error {
@@ -43,8 +47,10 @@ function defaultStatus(code: EmaErrorCode): number {
     case "VALIDATION":
       return 400;
     case "UNAUTHORIZED":
+    case "MICROSOFT_RECONNECT":
       return 401;
     case "FORBIDDEN":
+    case "UNKNOWN_USER":
       return 403;
     case "CONFLICT":
     case "INVALID_TRANSITION":

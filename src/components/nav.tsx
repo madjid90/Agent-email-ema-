@@ -13,10 +13,11 @@ export const NAV_ITEMS = [
   { href: "/historique", label: "Historique", icon: "🕓" },
   { href: "/regles", label: "Règles", icon: "⚙️" },
   { href: "/societes", label: "Sociétés", icon: "🏢" },
+  { href: "/parametres/connexions", label: "Connexions", icon: "🔗" },
   { href: "/parametres", label: "Paramètres", icon: "🔧" },
 ] as const;
 
-export function Nav({ pendingCount }: { pendingCount: number }) {
+export function Nav({ pendingCount, userLabel }: { pendingCount: number; userLabel?: string }) {
   const pathname = usePathname();
   return (
     <aside className="sidebar">
@@ -25,7 +26,7 @@ export function Nav({ pendingCount }: { pendingCount: number }) {
         <small>Assistant administratif email</small>
       </div>
       {NAV_ITEMS.map((item) => {
-        const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+        const active = item.href === "/" ? pathname === "/" : item.href === "/parametres" ? pathname === "/parametres" : pathname.startsWith(item.href);
         return (
           <Link key={item.href} href={item.href} className={`nav-link${active ? " active" : ""}`}>
             <span aria-hidden>{item.icon}</span>
@@ -35,6 +36,7 @@ export function Nav({ pendingCount }: { pendingCount: number }) {
         );
       })}
       <div className="nav-spacer" />
+      {userLabel ? <div className="muted" style={{ padding: "0.25rem 0.75rem", fontSize: "0.85rem", overflow: "hidden", textOverflow: "ellipsis" }}>{userLabel}</div> : null}
       <Link href="/setup" className={`nav-link${pathname.startsWith("/setup") ? " active" : ""}`}>
         <span aria-hidden>🧭</span>
         <span>Setup</span>

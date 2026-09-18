@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { route, ok, parseBody } from "@/lib/api";
+import { route, ok, parseBody, currentUser, ownedOr404 } from "@/lib/api";
 import { retryAction } from "@/actions/engine";
+import { getAction } from "@/database/repositories/actions";
 
 /**
  * Nouvelle tentative d'une action FAILED (déjà validée).
@@ -8,8 +9,9 @@ import { retryAction } from "@/actions/engine";
  * éléments envoyés. `force: true` n'est accepté qu'après vérification humaine
  * explicite depuis l'interface.
  */
-export const POST = route(async (req, ctx: { params: Promise<{ id: string }> }) => {
+export const POST = route(async (req, ctx: { params: Promise<{ id: string }> }, sessionUser) => {
   const { id } = await ctx.params;
+  ownedOr404(getAction(id), currentUser(sessionUser), `Action ${id}`);
   const body = await req
     .clone()
     .json()

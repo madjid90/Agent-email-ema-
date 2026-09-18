@@ -4,6 +4,8 @@ import type { FollowupKind, FollowupRow, FollowupStatus } from "../types";
 import { newId, nowIso } from "@/lib/ids";
 
 export interface NewFollowup {
+  /** Propriétaire ; à défaut, hérité de l'email surveillé. */
+  userId?: string | null;
   kind?: FollowupKind;
   threadId: string;
   emailId?: string | null;
@@ -20,14 +22,25 @@ export interface NewFollowup {
   createdBy?: string;
 }
 
+function ownerOf(input: NewFollowup, db: Db): string | null {
+  if (input.userId) return input.userId;
+  if (input.emailId) {
+    const e = db.prepare("SELECT user_id FROM emails WHERE id = ?").get(input.emailId) as { user_id: string | null } | undefined;
+    if (e?.user_id) return e.user_id;
+  }
+  const t = db.prepare("SELECT user_id FROM emails WHERE thread_id = ? AND user_id IS NOT NULL LIMIT 1").get(input.threadId) as { user_id: string | null } | undefined;
+  return t?.user_id ?? null;
+}
+
 export function insertFollowup(input: NewFollowup, db: Db = getDb()): FollowupRow {
   const id = newId("fup");
   const now = nowIso();
   db.prepare(
-    `INSERT INTO scheduled_followups (id, kind, thread_id, email_id, recipient, company_id, document_id, title, reason, execute_at, watch_after, status, attempts, max_attempts, action_id, created_by, created_at, updated_at)
-     VALUES (@id, @kind, @thread_id, @email_id, @recipient, @company_id, @document_id, @title, @reason, @execute_at, @watch_after, 'SCHEDULED', 0, @max_attempts, @action_id, @created_by, @created_at, @created_at)`,
+    `INSERT INTO scheduled_followups (id, user_id, kind, thread_id, email_id, recipient, company_id, document_id, title, reason, execute_at, watch_after, status, attempts, max_attempts, action_id, created_by, created_at, updated_at)
+     VALUES (@id, @user_id, @kind, @thread_id, @email_id, @recipient, @company_id, @document_id, @title, @reason, @execute_at, @watch_after, 'SCHEDULED', 0, @max_attempts, @action_id, @created_by, @created_at, @created_at)`,
   ).run({
     id,
+    user_id: ownerOf(input, db),
     kind: input.kind ?? "EXTERNAL_FOLLOWUP",
     thread_id: input.threadId,
     email_id: input.emailId ?? null,
@@ -55,6 +68,7 @@ export function getFollowupByGeneratedAction(actionId: string, db: Db = getDb())
 }
 
 export interface FollowupSearch {
+  userId?: string;
   status?: FollowupStatus | FollowupStatus[];
   kind?: FollowupKind;
   threadId?: string;
@@ -65,6 +79,10 @@ export interface FollowupSearch {
 export function listFollowups(opts: FollowupSearch = {}, db: Db = getDb()): FollowupRow[] {
   const clauses: string[] = [];
   const params: Record<string, unknown> = { limit: opts.limit ?? 200 };
+  if (opts.userId) {
+    clauses.push("user_id = @user_id");
+    params.user_id = opts.userId;
+  }
   if (opts.status) {
     const statuses = Array.isArray(opts.status) ? opts.status : [opts.status];
     clauses.push(`status IN (${statuses.map((_, i) => `@s${i}`).join(",")})`);

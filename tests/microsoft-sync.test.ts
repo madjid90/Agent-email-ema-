@@ -201,6 +201,6 @@ describe("Tools Outlook branchés sur Graph", () => {
     expect(thread.ok && (thread.data as unknown[]).length).toBe(1);
     const att = await executeTool("get_attachment", { email_id: e.id, attachment_id: "a1" }, ctx());
     expect(att.ok).toBe(false);
-    if (!att.ok) expect(att.error.code).toBe("CONFIG");
+    if (!att.ok) expect(att.error.code).toBe("MICROSOFT_RECONNECT");
   });
 });

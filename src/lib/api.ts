@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { EmaError, toEmaError } from "@/lib/errors";
-import { isAuthenticated } from "@/security/auth";
+import { getSessionUser } from "@/security/auth";
+import type { UserRow } from "@/database/types";
 import { bootstrap } from "./bootstrap";
 import { createLogger } from "./logger";
 
@@ -24,18 +25,35 @@ export function fail(err: unknown): NextResponse {
 
 /**
  * Enveloppe standard d'une route API : bootstrap, authentification (sauf
- * routes publiques), gestion d'erreur uniforme.
+ * routes publiques), gestion d'erreur uniforme. Le handler reçoit l'utilisateur
+ * de session (null sur une route publique) : c'est la seule source d'identité.
  */
-export function route<Ctx>(handler: (req: Request, ctx: Ctx) => Promise<NextResponse>, opts: { public?: boolean } = {}) {
+export function route<Ctx>(handler: (req: Request, ctx: Ctx, user: UserRow | null) => Promise<NextResponse>, opts: { public?: boolean } = {}) {
   return async (req: Request, ctx: Ctx): Promise<NextResponse> => {
     try {
       bootstrap();
-      if (!opts.public && !(await isAuthenticated())) throw new EmaError("UNAUTHORIZED", "Authentification requise");
-      return await handler(req, ctx);
+      const user = await getSessionUser();
+      if (!opts.public && !user) throw new EmaError("UNAUTHORIZED", "Authentification requise");
+      return await handler(req, ctx, user);
     } catch (err) {
       return fail(err);
     }
   };
+}
+
+/**
+ * Isolation : une ressource d'un autre compte est traitée comme inexistante.
+ * Une ligne sans propriétaire (antérieure à 010_users) reste accessible.
+ */
+export function ownedOr404<T extends { user_id: string | null }>(row: T | undefined | null, user: UserRow, what: string): T {
+  if (!row || (row.user_id && row.user_id !== user.id)) throw new EmaError("NOT_FOUND", `${what} introuvable`);
+  return row;
+}
+
+/** Utilisateur garanti (routes non publiques). */
+export function currentUser(user: UserRow | null): UserRow {
+  if (!user) throw new EmaError("UNAUTHORIZED", "Authentification requise");
+  return user;
 }
 
 export async function parseBody<S extends z.ZodTypeAny>(req: Request, schema: S): Promise<z.infer<S>> {

@@ -4,6 +4,8 @@ import type { DocumentCategory, DocumentRow } from "../types";
 import { newId, nowIso } from "@/lib/ids";
 
 export interface NewDocument {
+  /** Propriétaire ; à défaut, hérité de l'email (ou du document parent). */
+  userId?: string | null;
   parentDocumentId?: string | null;
   emailId?: string | null;
   attachmentId?: string | null;
@@ -18,13 +20,27 @@ export interface NewDocument {
   status?: string;
 }
 
+function inheritedOwner(input: NewDocument, db: Db): string | null {
+  if (input.userId) return input.userId;
+  if (input.emailId) {
+    const e = db.prepare("SELECT user_id FROM emails WHERE id = ?").get(input.emailId) as { user_id: string | null } | undefined;
+    if (e?.user_id) return e.user_id;
+  }
+  if (input.parentDocumentId) {
+    const d = db.prepare("SELECT user_id FROM documents WHERE id = ?").get(input.parentDocumentId) as { user_id: string | null } | undefined;
+    if (d?.user_id) return d.user_id;
+  }
+  return null;
+}
+
 export function insertDocument(input: NewDocument, db: Db = getDb()): DocumentRow {
   const id = newId("doc");
   db.prepare(
-    `INSERT INTO documents (id, email_id, attachment_id, name, mime_type, size, category, company_id, original_path, stored_name, sha256, status, created_at, parent_document_id)
-     VALUES (@id, @email_id, @attachment_id, @name, @mime_type, @size, @category, @company_id, @original_path, @stored_name, @sha256, @status, @created_at, @parent_document_id)`,
+    `INSERT INTO documents (id, user_id, email_id, attachment_id, name, mime_type, size, category, company_id, original_path, stored_name, sha256, status, created_at, parent_document_id)
+     VALUES (@id, @user_id, @email_id, @attachment_id, @name, @mime_type, @size, @category, @company_id, @original_path, @stored_name, @sha256, @status, @created_at, @parent_document_id)`,
   ).run({
     id,
+    user_id: inheritedOwner(input, db),
     email_id: input.emailId ?? null,
     attachment_id: input.attachmentId ?? null,
     name: input.name,
@@ -50,9 +66,13 @@ export function getDocumentByAttachment(emailId: string, attachmentId: string, d
   return db.prepare("SELECT * FROM documents WHERE email_id = ? AND attachment_id = ?").get(emailId, attachmentId) as DocumentRow | undefined;
 }
 
-export function listDocuments(opts: { category?: DocumentCategory; emailId?: string; limit?: number } = {}, db: Db = getDb()): DocumentRow[] {
+export function listDocuments(opts: { category?: DocumentCategory; emailId?: string; limit?: number; userId?: string } = {}, db: Db = getDb()): DocumentRow[] {
   const clauses: string[] = [];
   const params: Record<string, unknown> = { limit: opts.limit ?? 200 };
+  if (opts.userId) {
+    clauses.push("user_id = @user_id");
+    params.user_id = opts.userId;
+  }
   if (opts.category) {
     clauses.push("category = @category");
     params.category = opts.category;
@@ -93,11 +113,16 @@ export interface DocumentSearch {
   requiresReview?: boolean;
   possibleDuplicate?: boolean;
   limit?: number;
+  userId?: string;
 }
 
 export function searchDocuments(opts: DocumentSearch = {}, db: Db = getDb()): DocumentRow[] {
   const clauses: string[] = [];
   const params: Record<string, unknown> = { limit: opts.limit ?? 100 };
+  if (opts.userId) {
+    clauses.push("user_id = @user_id");
+    params.user_id = opts.userId;
+  }
   if (opts.docType) {
     const types = Array.isArray(opts.docType) ? opts.docType : [opts.docType];
     clauses.push(`doc_type IN (${types.map((_, i) => `@t${i}`).join(",")})`);

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, ConfidenceBadge, DocTypeBadge, Empty } from "@/components/ui";
 import { getDb } from "@/database/connection";
+import { requireSessionUser } from "@/security/auth";
 import { searchDocuments } from "@/database/repositories/documents";
 import { getEmail } from "@/database/repositories/emails";
 import { getCompanies, getSettings } from "@/lib/config";
@@ -47,7 +48,8 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
     other: { docType: ["BANK_DETAILS", "PURCHASE_ORDER", "CONTRACT", "OTHER", "UNKNOWN"] },
     all: {},
   } satisfies Record<Tab, import("@/database/repositories/documents").DocumentSearch>)[tab];
-  const docs = searchDocuments({ ...opts, query: q || undefined, limit: 300 }, db);
+  const user = await requireSessionUser(db);
+  const docs = searchDocuments({ ...opts, query: q || undefined, limit: 300, userId: user.id }, db);
 
   return (
     <>

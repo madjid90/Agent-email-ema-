@@ -1,4 +1,4 @@
-import { getEnv, getApproverPhone } from "@/lib/env";
+import { getEnv } from "@/lib/env";
 import { EmaError } from "@/lib/errors";
 import { createLogger } from "@/lib/logger";
 import type { WhatsappOutgoingMessage, WhatsappSendResponse } from "./types";
@@ -122,5 +122,6 @@ export function setWhatsappClientForTests(client: WhatsappClient | null): void {
 
 export function isWhatsappConfigured(): boolean {
   const env = getEnv();
-  return Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_VERIFY_TOKEN && getApproverPhone());
+  // Numéro WhatsApp Business central d'EMA : les utilisateurs sont identifiés par leur compte, pas par .env.
+  return Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_VERIFY_TOKEN);
 }

@@ -8,7 +8,8 @@ import { openIsolatedDb, type Db } from "@/database/connection";
 import { assertEnvUsable, checkEnv, getEnv, resetEnvCache } from "@/lib/env";
 import { loadDotEnv, resetDotEnvForTests } from "@/lib/dotenv";
 import { clearRateLimits, clientKey, hitRateLimit, LOGIN_RATE_LIMIT, resetRateLimit } from "@/security/rate-limit";
-import { isSessionValueValid, createSessionValue, sessionCookieOptions, verifyPassword } from "@/security/auth";
+import { isSessionValueValid, createSessionValue, parseSessionValue, sessionCookieOptions } from "@/security/auth";
+import { hashPassword, verifyPasswordHash } from "@/security/passwords";
 import { maskPersonalData, redact } from "@/lib/logger";
 import { GENERIC_INTERNAL_MESSAGE, EmaError, toEmaError, isTechnicalMessage } from "@/lib/errors";
 import { ensurePrivateDirs, inspectPermissions, privateRoot, safeJoin, PRIVATE_DIR_MODE } from "@/lib/paths";
@@ -42,10 +43,11 @@ function envWith(over: Record<string, string | undefined>) {
 describe("Validation de la configuration au démarrage", () => {
   afterEach(() => resetEnvCache());
 
-  it("production : secret ou mot de passe absent → démarrage refusé avec un message exploitable", () => {
-    const { env, restore } = envWith({ NODE_ENV: "production", APP_SECRET: undefined, APP_PASSWORD: undefined, APP_URL: "https://ema.example.fr" });
+  it("production : secret absent → démarrage refusé avec un message exploitable (APP_PASSWORD obsolète : avertissement)", () => {
+    const { env, restore } = envWith({ NODE_ENV: "production", APP_SECRET: undefined, APP_PASSWORD: "ancien-mot-de-passe", APP_URL: "https://ema.example.fr" });
     const issues = checkEnv(env);
-    expect(issues.filter((i) => i.level === "error").map((i) => i.variable)).toEqual(expect.arrayContaining(["APP_SECRET", "APP_PASSWORD"]));
+    expect(issues.filter((i) => i.level === "error").map((i) => i.variable)).toEqual(expect.arrayContaining(["APP_SECRET"]));
+    expect(issues.find((i) => i.variable === "APP_PASSWORD")?.level).toBe("warning");
     expect(() => assertEnvUsable(env)).toThrow(/Configuration incomplète/);
     expect(() => assertEnvUsable(env)).toThrow(/APP_SECRET/);
     restore();
@@ -64,7 +66,9 @@ describe("Validation de la configuration au démarrage", () => {
       WHATSAPP_APPROVER_PHONE: undefined,
     });
     const blocking = checkEnv(env).filter((i) => i.level === "error").map((i) => i.variable);
-    expect(blocking).toEqual(expect.arrayContaining(["APP_URL", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_APPROVER_PHONE"]));
+    expect(blocking).toEqual(expect.arrayContaining(["APP_URL", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET"]));
+    // Le numéro autorisé n'est plus une variable : chaque utilisateur active le sien depuis son compte.
+    expect(blocking).not.toContain("WHATSAPP_APPROVER_PHONE");
     restore();
   });
 
@@ -131,18 +135,23 @@ describe("Authentification et limitation de débit", () => {
     restore();
   });
 
-  it("mot de passe, cookie de session et falsification", () => {
-    const { restore } = envWith({ NODE_ENV: "production", APP_SECRET: "s".repeat(40), APP_PASSWORD: "bon-mot-de-passe" });
-    expect(verifyPassword("bon-mot-de-passe")).toBe(true);
-    expect(verifyPassword("mauvais")).toBe(false);
-    expect(verifyPassword("")).toBe(false);
-    const value = createSessionValue();
-    expect(isSessionValueValid(value)).toBe(true);
+  it("mot de passe haché, cookie de session porteur du compte et falsification", () => {
+    const { restore } = envWith({ NODE_ENV: "production", APP_SECRET: "s".repeat(40) });
+    const hash = hashPassword("bon-mot-de-passe");
+    expect(hash).not.toContain("bon-mot-de-passe");
+    expect(verifyPasswordHash("bon-mot-de-passe", hash)).toBe(true);
+    expect(verifyPasswordHash("mauvais", hash)).toBe(false);
+    expect(verifyPasswordHash("", hash)).toBe(false);
+    expect(verifyPasswordHash("bon-mot-de-passe", null)).toBe(false);
+    const value = createSessionValue("usr_abc");
+    expect(parseSessionValue(value)).toBe("usr_abc");
     expect(isSessionValueValid(`${value}x`)).toBe(false);
-    expect(isSessionValueValid("9999999999.signature-bidon")).toBe(false);
+    // Changer l'identifiant du compte invalide la signature.
+    expect(parseSessionValue(value.replace("usr_abc", "usr_autre"))).toBeNull();
+    expect(isSessionValueValid("usr_abc.9999999999.signature-bidon")).toBe(false);
     expect(isSessionValueValid(undefined)).toBe(false);
     // Session expirée
-    expect(isSessionValueValid("1000000000.abc")).toBe(false);
+    expect(isSessionValueValid("usr_abc.1000000000.abc")).toBe(false);
     const opts = sessionCookieOptions();
     expect(opts).toMatchObject({ httpOnly: true, sameSite: "lax", secure: true, path: "/" });
     restore();

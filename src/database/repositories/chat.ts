@@ -4,6 +4,8 @@ import type { ChatChannel, ChatMessageRow } from "../types";
 import { newId, nowIso } from "@/lib/ids";
 
 export interface NewChatMessage {
+  /** Propriétaire de la conversation : jamais mélangée entre utilisateurs. */
+  userId?: string | null;
   role: ChatMessageRow["role"];
   content: string;
   toolCalls?: unknown;
@@ -21,10 +23,11 @@ export interface NewChatMessage {
 export function insertMessage(input: NewChatMessage, db: Db = getDb()): ChatMessageRow {
   const id = newId("msg");
   db.prepare(
-    `INSERT INTO chat_messages (id, role, content, tool_calls, created_at, channel, external_id, sender, refs, email_id, document_id, action_id)
-     VALUES (@id, @role, @content, @tool_calls, @created_at, @channel, @external_id, @sender, @refs, @email_id, @document_id, @action_id)`,
+    `INSERT INTO chat_messages (id, user_id, role, content, tool_calls, created_at, channel, external_id, sender, refs, email_id, document_id, action_id)
+     VALUES (@id, @user_id, @role, @content, @tool_calls, @created_at, @channel, @external_id, @sender, @refs, @email_id, @document_id, @action_id)`,
   ).run({
     id,
+    user_id: input.userId ?? null,
     role: input.role,
     content: input.content,
     tool_calls: input.toolCalls === undefined ? null : JSON.stringify(input.toolCalls),
@@ -45,21 +48,32 @@ export function insertChatMessage(role: ChatMessageRow["role"], content: string,
   return insertMessage({ role, content, toolCalls }, db);
 }
 
-export function listChatMessages(limit = 50, db: Db = getDb(), channel: ChatChannel = "WEB"): ChatMessageRow[] {
-  const rows = db.prepare("SELECT * FROM chat_messages WHERE channel = ? ORDER BY created_at DESC LIMIT ?").all(channel, limit) as ChatMessageRow[];
+/**
+ * Historique d'un canal. `userId` fourni : uniquement la conversation de cet
+ * utilisateur ; absent (instance mono-utilisateur, tests) : le canal entier.
+ */
+export function listChatMessages(limit = 50, db: Db = getDb(), channel: ChatChannel = "WEB", userId?: string | null): ChatMessageRow[] {
+  const rows = (userId
+    ? db.prepare("SELECT * FROM chat_messages WHERE channel = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?").all(channel, userId, limit)
+    : db.prepare("SELECT * FROM chat_messages WHERE channel = ? ORDER BY created_at DESC LIMIT ?").all(channel, limit)) as ChatMessageRow[];
   return rows.reverse();
 }
 
 /** Dernier message de l'assistant portant des références numérotées (contexte multi-tours). */
-export function lastMessageWithRefs(channel: ChatChannel, db: Db = getDb()): ChatMessageRow | null {
-  return (db.prepare("SELECT * FROM chat_messages WHERE channel = ? AND role = 'assistant' AND refs IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(channel) as ChatMessageRow | undefined) ?? null;
+export function lastMessageWithRefs(channel: ChatChannel, db: Db = getDb(), userId?: string | null): ChatMessageRow | null {
+  const row = userId
+    ? db.prepare("SELECT * FROM chat_messages WHERE channel = ? AND user_id = ? AND role = 'assistant' AND refs IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(channel, userId)
+    : db.prepare("SELECT * FROM chat_messages WHERE channel = ? AND role = 'assistant' AND refs IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(channel);
+  return (row as ChatMessageRow | undefined) ?? null;
 }
 
 export function getMessageByExternalId(externalId: string, db: Db = getDb()): ChatMessageRow | null {
   return (db.prepare("SELECT * FROM chat_messages WHERE external_id = ?").get(externalId) as ChatMessageRow | undefined) ?? null;
 }
 
-export function clearChat(db: Db = getDb(), channel?: ChatChannel): void {
-  if (channel) db.prepare("DELETE FROM chat_messages WHERE channel = ?").run(channel);
+export function clearChat(db: Db = getDb(), channel?: ChatChannel, userId?: string | null): void {
+  if (userId && channel) db.prepare("DELETE FROM chat_messages WHERE channel = ? AND user_id = ?").run(channel, userId);
+  else if (userId) db.prepare("DELETE FROM chat_messages WHERE user_id = ?").run(userId);
+  else if (channel) db.prepare("DELETE FROM chat_messages WHERE channel = ?").run(channel);
   else db.prepare("DELETE FROM chat_messages").run();
 }

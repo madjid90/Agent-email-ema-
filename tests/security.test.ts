@@ -38,9 +38,10 @@ describe("Chiffrement et signatures", () => {
     expect(hmacVerify("payload2", sig)).toBe(false);
   });
   it("valide une session signée et refuse une session falsifiée", () => {
-    const v = createSessionValue();
+    const v = createSessionValue("usr_test");
     expect(isSessionValueValid(v)).toBe(true);
-    expect(isSessionValueValid(`9999999999.${v.split(".")[1]}`)).toBe(false);
+    expect(isSessionValueValid(`usr_test.9999999999.${v.split(".")[2]}`)).toBe(false);
+    expect(isSessionValueValid(`usr_autre.${v.split(".")[1]}.${v.split(".")[2]}`)).toBe(false);
     expect(isSessionValueValid("garbage")).toBe(false);
     expect(isSessionValueValid(undefined)).toBe(false);
   });

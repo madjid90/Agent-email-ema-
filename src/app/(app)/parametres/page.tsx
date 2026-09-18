@@ -9,13 +9,15 @@ import { getWhatsappStatus } from "@/integrations/whatsapp";
 import { activitySummary, costReport, mb, runChecks, DISK_WARN_RATIO } from "@/lib/diagnostics";
 import { formatDateTime } from "@/lib/time";
 import pkg from "../../../../package.json";
+import { requireSessionUser } from "@/security/auth";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const user = await requireSessionUser();
   const settings = getSettings();
   const integrations = getConfiguredIntegrations();
-  const outlook = getOutlookStatus();
+  const outlook = getOutlookStatus(undefined, user.id);
   const whatsapp = getWhatsappStatus();
   const env = getEnv();
   const health = runChecks(pkg.version);
@@ -31,10 +33,9 @@ export default function SettingsPage() {
         <table>
           <tbody>
             {row("Claude (Anthropic)", integrations.anthropic, `modèle : ${env.ANTHROPIC_MODEL}`)}
-            {row("Microsoft Graph / Outlook", integrations.microsoft && outlook.connected, outlook.connected ? `connecté : ${outlook.accountEmail ?? ""}` : "non connecté")}
-            {row("WhatsApp Business", whatsapp.configured, whatsapp.approverPhone ? `validation par ${whatsapp.approverPhone}` : "numéro autorisé manquant")}
+            {row("Microsoft Graph / Outlook", integrations.microsoft && outlook.connected, outlook.connected ? `votre boîte : ${outlook.accountEmail ?? ""}` : "votre boîte n'est pas connectée (Connexions)")}
+            {row("WhatsApp Business EMA", whatsapp.configured, whatsapp.configured ? "numéro central configuré — activation par utilisateur dans Connexions" : "token / numéro manquants")}
             {row("Secret applicatif (APP_SECRET)", integrations.appSecret)}
-            {row("Mot de passe interface (APP_PASSWORD)", integrations.appPassword)}
           </tbody>
         </table>
         <p className="muted" style={{ marginTop: "0.75rem" }}>Les secrets se modifient uniquement dans le fichier <code>.env</code> du VPS, jamais depuis l&apos;interface.</p>

@@ -51,7 +51,7 @@ export async function testWhatsappConnection(): Promise<{ ok: boolean; message: 
   const status = getWhatsappStatus();
   if (!status.tokenConfigured || !status.phoneNumberIdConfigured) return { ok: false, message: "WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID non renseignés" };
   if (!status.verifyTokenConfigured) return { ok: false, message: "WHATSAPP_VERIFY_TOKEN non renseigné" };
-  if (!status.approverConfigured) return { ok: false, message: "WHATSAPP_APPROVER_PHONE non renseigné" };
+  if (!status.approverConfigured) return { ok: false, message: "Aucun numéro de test : renseignez WHATSAPP_APPROVER_PHONE (numéro de test) ou activez WhatsApp depuis votre compte" };
   const approver = getApproverPhone() as string;
   try {
     const r = await getWhatsappClient().send(textMessage(approver, TEST_MESSAGE));

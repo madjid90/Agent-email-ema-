@@ -15,18 +15,24 @@ describe("OAuth Microsoft", () => {
   it("construit une URL d'autorisation avec les seules permissions nécessaires", () => {
     const url = new URL(buildAuthorizeUrl("abc"));
     expect(url.origin + url.pathname).toBe("https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
-    expect(url.searchParams.get("scope")).toBe("offline_access User.Read Mail.Read Mail.Send");
+    // Permissions DÉLÉGUÉES minimales : identité (openid/profile), refresh (offline_access), lecture et envoi du seul utilisateur.
+    expect(url.searchParams.get("scope")).toBe("openid profile offline_access User.Read Mail.Read Mail.Send");
     expect(url.searchParams.get("state")).toBe("abc");
     expect(GRAPH_SCOPES).not.toContain("Mail.ReadWrite");
   });
 
   it("refuse un état inconnu, expiré ou réutilisé", () => {
-    expect(consumeOAuthState("nope", { db })).toBe(false);
-    const s = createOAuthState({ db });
-    expect(consumeOAuthState(s, { db })).toBe(true);
-    expect(consumeOAuthState(s, { db })).toBe(false);
+    expect(consumeOAuthState("nope", { db }).ok).toBe(false);
+    const s = createOAuthState({ db, userId: "usr_1" });
+    expect(consumeOAuthState(s, { db })).toEqual({ ok: true, userId: "usr_1" });
+    expect(consumeOAuthState(s, { db }).ok).toBe(false);
     const old = createOAuthState({ db, now: () => Date.now() - 11 * 60 * 1000 });
-    expect(consumeOAuthState(old, { db })).toBe(false);
+    expect(consumeOAuthState(old, { db }).ok).toBe(false);
+    // Deux utilisateurs peuvent lancer le flux en parallèle : chaque état est indépendant.
+    const a = createOAuthState({ db, userId: "usr_a" });
+    const b = createOAuthState({ db, userId: "usr_b" });
+    expect(consumeOAuthState(b, { db })).toEqual({ ok: true, userId: "usr_b" });
+    expect(consumeOAuthState(a, { db })).toEqual({ ok: true, userId: "usr_a" });
   });
 
   it("callback invalide : aucun token stocké", async () => {
@@ -41,7 +47,7 @@ describe("OAuth Microsoft", () => {
     expect(r.accountEmail).toBe("moi@entreprise.fr");
     expect((calls[0]?.body as Record<string, string>).grant_type).toBe("authorization_code");
     const row = getToken("microsoft", db);
-    expect(row?.account_email).toBe("moi@entreprise.fr");
+    expect(row?.provider_account_email).toBe("moi@entreprise.fr");
     expect(row?.encrypted).not.toContain("access-token-secret-value");
     expect(row?.encrypted).not.toContain("refresh-token-secret-value");
     expect(loadTokenSet(db)?.set.refreshToken).toBe("refresh-token-secret-value");
@@ -81,7 +87,7 @@ describe("OAuth Microsoft", () => {
 
   it("sans connexion Outlook, le client refuse d'appeler Graph", async () => {
     const client = createConnectedGraphClient({ db, fetchImpl: fakeFetch([]).fetchImpl, sleep: noSleep });
-    await expect(client.get("/me")).rejects.toMatchObject({ code: "CONFIG" });
+    await expect(client.get("/me")).rejects.toMatchObject({ code: "MICROSOFT_RECONNECT" });
   });
 
   it("déconnexion : tokens supprimés, curseur effacé", () => {

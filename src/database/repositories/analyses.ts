@@ -86,8 +86,8 @@ export interface EmailWithAnalysis {
   amount_currency: string | null;
 }
 
-export function listEmailsWithAnalysis(opts: { limit?: number; since?: string } = {}, db: Db = getDb()): EmailWithAnalysis[] {
-  const params: Record<string, unknown> = { limit: opts.limit ?? 100, since: opts.since ?? "" };
+export function listEmailsWithAnalysis(opts: { limit?: number; since?: string; userId?: string } = {}, db: Db = getDb()): EmailWithAnalysis[] {
+  const params: Record<string, unknown> = { limit: opts.limit ?? 100, since: opts.since ?? "", user_id: opts.userId ?? null };
   return db
     .prepare(
       `SELECT e.id AS email_id, e.subject, e.sender_name, e.sender_email, e.received_at, e.status,
@@ -97,7 +97,7 @@ export function listEmailsWithAnalysis(opts: { limit?: number; since?: string } 
        LEFT JOIN email_analyses a ON a.id = (
          SELECT id FROM email_analyses WHERE email_id = e.id ORDER BY created_at DESC LIMIT 1
        )
-       WHERE e.direction = 'inbound' AND e.status != 'CONTEXT' AND (@since = '' OR e.received_at >= @since)
+       WHERE e.direction = 'inbound' AND e.status != 'CONTEXT' AND (@since = '' OR e.received_at >= @since) AND (@user_id IS NULL OR e.user_id = @user_id)
        ORDER BY e.received_at DESC LIMIT @limit`,
     )
     .all(params) as EmailWithAnalysis[];

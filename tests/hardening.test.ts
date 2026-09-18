@@ -877,23 +877,23 @@ describe("Démarrage du worker", () => {
     }
   });
 
-  it("production : mot de passe d'interface trop court → démarrage refusé (pas un simple avertissement)", async () => {
+  it("production : APP_SECRET trop court → démarrage refusé ; APP_PASSWORD (obsolète) n'est qu'un avertissement", async () => {
     const { checkEnv, assertEnvUsable, getEnv } = await import("@/lib/env");
     const saved = { ...process.env };
     setEnv("NODE_ENV", "production");
-    setEnv("APP_SECRET", "s".repeat(40));
-    setEnv("APP_PASSWORD", "court123"); // 8 caractères
+    setEnv("APP_SECRET", "court");
+    setEnv("APP_PASSWORD", "ancien-mot-de-passe");
     setEnv("APP_URL", "https://ema.exemple.fr");
     resetEnvCache();
     try {
       const issues = checkEnv(getEnv());
-      const password = issues.find((i) => i.variable === "APP_PASSWORD");
-      expect(password?.level).toBe("error");
-      expect(() => assertEnvUsable(getEnv())).toThrow(/APP_PASSWORD/);
-      // Hors production, le même mot de passe reste un simple avertissement.
+      expect(issues.find((i) => i.variable === "APP_SECRET")?.level).toBe("error");
+      expect(issues.find((i) => i.variable === "APP_PASSWORD")?.level).toBe("warning");
+      expect(() => assertEnvUsable(getEnv())).toThrow(/APP_SECRET/);
+      // Hors production, le même manque reste un simple avertissement.
       setEnv("NODE_ENV", "development");
       resetEnvCache();
-      expect(checkEnv(getEnv()).find((i) => i.variable === "APP_PASSWORD")?.level).toBe("warning");
+      expect(checkEnv(getEnv()).find((i) => i.variable === "APP_SECRET")?.level).toBe("warning");
     } finally {
       process.env = saved;
       resetEnvCache();

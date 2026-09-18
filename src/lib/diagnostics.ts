@@ -11,6 +11,9 @@ import { assetStatus } from "@/documents/assets";
 import { checkEnv, getConfiguredIntegrations, getEnv } from "./env";
 import { databasePath, inspectPermissions, privateRoot, PRIVATE_DIRS, resolveFromRoot } from "./paths";
 import { isOutlookConnected } from "@/integrations/microsoft/graph-client";
+import { listUsers } from "@/database/repositories/users";
+import { listActiveConnections } from "@/database/repositories/connections";
+import { TOKEN_PROVIDER } from "@/integrations/microsoft/token-store";
 import { startOfTodayIso } from "./time";
 
 /**
@@ -198,13 +201,21 @@ export function runChecks(version: string, now: Date = new Date(), db?: Db): Hea
   // Intégrations
   const integrations = getConfiguredIntegrations();
   checks.push({ name: "Anthropic", level: integrations.anthropic ? "PASS" : "WARN", detail: integrations.anthropic ? `clé présente, modèle ${env.ANTHROPIC_MODEL}` : "ANTHROPIC_API_KEY absente" });
-  let outlook = false;
-  try {
-    outlook = isOutlookConnected();
-  } catch {
-    outlook = false;
-  }
-  checks.push({ name: "Outlook", level: outlook ? "PASS" : "WARN", detail: outlook ? "mailbox connectée (token stocké)" : "aucune mailbox connectée — /setup" });
+  // Comptes et boîtes : un utilisateur = une connexion Outlook, un numéro WhatsApp vérifié.
+  const users = listUsers(db ?? getDb());
+  const connected = listActiveConnections(TOKEN_PROVIDER, db ?? getDb());
+  const legacy = isOutlookConnected(db ?? getDb(), null);
+  const whatsappUsers = users.filter((u) => u.status === "active" && u.phone_verified === 1 && u.whatsapp_enabled === 1).length;
+  checks.push({
+    name: "utilisateurs",
+    level: users.length === 0 ? "WARN" : "PASS",
+    detail: users.length === 0 ? "aucun compte : créer le premier depuis /login" : `${users.length} compte(s), ${whatsappUsers} avec WhatsApp activé`,
+  });
+  checks.push({
+    name: "Outlook",
+    level: connected.length > 0 || legacy ? "PASS" : "WARN",
+    detail: connected.length > 0 ? `${connected.length} boîte(s) connectée(s) (tokens chiffrés par utilisateur)` : legacy ? "connexion héritée sans compte : adoptée par le premier compte créé" : "aucune boîte connectée — Paramètres → Connexions",
+  });
   checks.push({
     name: "WhatsApp",
     level: integrations.whatsapp ? "PASS" : "WARN",

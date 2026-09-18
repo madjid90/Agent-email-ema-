@@ -35,7 +35,7 @@ export function createSigningExecutor(d: SigningExecutorDeps = {}): ActionExecut
     type: "sign_document",
     async execute(payload, ctx): Promise<ExecutionResult> {
       const db = d.db ?? getDb();
-      const client = d.client ?? createConnectedGraphClient({ db });
+      const client = d.client ?? createConnectedGraphClient({ db, userId: ctx.userId ?? undefined });
       const now = d.now ?? (() => new Date());
       const original = documentsRepo.getDocument(payload.document_id, db);
       if (!original) throw new EmaError("NOT_FOUND", `Document ${payload.document_id} introuvable`);
@@ -57,7 +57,7 @@ export function createSigningExecutor(d: SigningExecutorDeps = {}): ActionExecut
         const sent = email.thread_id ? await findLatestSentInConversation(client, email.thread_id, since) : null;
         if (sent) {
           const existing = emailsRepo.getEmailByGraphId(sent.id, db);
-          sentEmailId = existing?.id ?? emailsRepo.insertEmail(toNewEmail(sent, { accountEmail: loadTokenSet(db)?.accountEmail ?? null, direction: "outbound", status: "PROCESSED" }), db).id;
+          sentEmailId = existing?.id ?? emailsRepo.insertEmail({ ...toNewEmail(sent, { accountEmail: loadTokenSet(db, ctx.userId ?? undefined)?.accountEmail ?? null, direction: "outbound", status: "PROCESSED" }), userId: ctx.userId }, db).id;
         }
       } catch (err) {
         log.warn("could not record sent signed reply", { message: err instanceof Error ? err.message : String(err) });

@@ -6,6 +6,7 @@ Ce document décrit comment EMA se connecte à **une seule** boîte Outlook, ce 
 
 | Permission | Pourquoi | Appels |
 |---|---|---|
+| `openid`, `profile` | Identité OpenID Connect standard de l'utilisateur qui consent (aucune donnée supplémentaire lue) | `/oauth2/v2.0/authorize` |
 | `offline_access` | Obtenir un refresh token : l'autorisation survit à l'expiration de l'access token (~1 h) | `/oauth2/v2.0/token` |
 | `User.Read` | Connaître l'adresse de la mailbox connectée | `GET /me` |
 | `Mail.Read` | Lire les messages, les conversations, les pièces jointes, la delta query, la recherche | `GET /me/mailFolders/inbox/messages/delta`, `GET /me/messages…`, `GET /me/messages/{id}/attachments…` |
@@ -13,7 +14,7 @@ Ce document décrit comment EMA se connecte à **une seule** boîte Outlook, ce 
 
 **Pas de `Mail.ReadWrite`** : EMA ne crée pas de brouillon, ne marque rien comme lu, ne déplace, n'archive et ne supprime aucun email. Les envois passent par les actions directes `reply` / `forward` / `sendMail` qui ne nécessitent que `Mail.Send`.
 
-Ces quatre permissions sont demandées telles quelles dans l'URL d'autorisation (`GRAPH_SCOPES`, `src/integrations/microsoft/oauth.ts`). Dans Azure, déclarez-les en **Delegated permissions** sur l'App registration ; aucune permission d'application (`Mail.Read` application-wide) n'est utilisée.
+Ces permissions **déléguées** (EMA agit au nom de l'utilisateur connecté, jamais sur toutes les boîtes d'un tenant) sont demandées telles quelles dans l'URL d'autorisation (`GRAPH_SCOPES`, `src/integrations/microsoft/oauth.ts`). Dans Azure, déclarez-les en **Delegated permissions** sur l'App registration ; aucune permission d'application (`Mail.Read` application-wide) n'est utilisée.
 
 > Vérification : ce jeu de permissions correspond aux tables « Permissions » de la documentation Microsoft Graph pour `message: delta`, `message: get`, `attachment: get`, `message: reply/forward`, `user: sendMail` (niveau *least privileged*). À contrôler lors de la création de l'App registration si Microsoft fait évoluer ces exigences.
 
@@ -22,7 +23,10 @@ Ces quatre permissions sont demandées telles quelles dans l'URL d'autorisation 
 1. Portail Azure → *App registrations* → *New registration* (comptes : « Accounts in this organizational directory only » ou « any organizational directory » selon le client ; `MICROSOFT_TENANT_ID` = id du tenant, ou `common`).
 2. *Authentication* → plateforme **Web** → Redirect URI : `https://ema.client.fr/api/integrations/microsoft/callback` (identique à `MICROSOFT_REDIRECT_URI`).
 3. *Certificates & secrets* → *New client secret* → `MICROSOFT_CLIENT_SECRET`.
-4. *API permissions* → Microsoft Graph → Delegated : `User.Read`, `Mail.Read`, `Mail.Send`, `offline_access` → *Grant admin consent* si le tenant l'exige.
+4. *API permissions* → Microsoft Graph → Delegated : `openid`, `profile`, `offline_access`, `User.Read`, `Mail.Read`, `Mail.Send` → *Grant admin consent* si le tenant l'exige. **Aucune permission d'application.**
+5. Plusieurs dirigeants de tenants différents : choisir « Accounts in any organizational directory » et `MICROSOFT_TENANT_ID=common` — chaque utilisateur consent pour sa propre boîte.
+
+Depuis le 18/09/2026, la connexion est **par utilisateur** (Paramètres → Connexions) : l'état OAuth mémorise le compte qui lance le flux, le callback lui attribue les tokens (`connections`), le worker synchronise chaque boîte connectée avec son propre curseur. Un refresh refusé (`invalid_grant`, `interaction_required`…) marque la connexion `revoked` ; les tools renvoient `MICROSOFT_RECONNECT` et l'utilisateur voit « Votre connexion Microsoft a expiré ou a été révoquée. Reconnectez Outlook. »
 
 ## 3. Flux OAuth (authorization code)
 

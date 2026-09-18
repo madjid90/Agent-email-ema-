@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Card, ConfidenceBadge, DocTypeBadge, RiskBadge, StatusBadge } from "@/components/ui";
 import { ReanalyzeButton } from "@/components/reanalyze-button";
 import { getDb } from "@/database/connection";
+import { requireSessionUser } from "@/security/auth";
 import { getDocument } from "@/database/repositories/documents";
 import { getEmail } from "@/database/repositories/emails";
 import { listHistory } from "@/database/repositories/history";
@@ -18,8 +19,9 @@ export const dynamic = "force-dynamic";
 export default async function DocumentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
+  const user = await requireSessionUser(db);
   const doc = getDocument(id, db);
-  if (!doc) notFound();
+  if (!doc || (doc.user_id && doc.user_id !== user.id)) notFound();
   const settings = getSettings();
   const tz = settings.company.timezone;
   const companies = new Map(getCompanies().map((c) => [c.id, c.name]));

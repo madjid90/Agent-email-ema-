@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, Empty } from "@/components/ui";
 import { getDb } from "@/database/connection";
+import { requireSessionUser } from "@/security/auth";
 import { listHistory } from "@/database/repositories/history";
 import { getSettings } from "@/lib/config";
 import { formatDateTime, formatTime } from "@/lib/time";
@@ -9,10 +10,11 @@ export const dynamic = "force-dynamic";
 
 const ACTOR_LABEL: Record<string, string> = { ema: "EMA", user: "Vous", worker: "Worker", whatsapp: "WhatsApp", system: "Système" };
 
-export default function HistoryPage() {
+export default async function HistoryPage() {
   const db = getDb();
+  const user = await requireSessionUser(db);
   const tz = getSettings().company.timezone;
-  const events = listHistory({ limit: 300 }, db);
+  const events = listHistory({ limit: 300, userId: user.id }, db);
   const byDay = new Map<string, typeof events>();
   for (const e of events) {
     const day = formatDateTime(e.at, tz).slice(0, 10);

@@ -2,6 +2,28 @@
 
 Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
+## [1.1.0] — Assistant multi-dirigeants : comptes, Outlook par utilisateur, WhatsApp EMA central — 2026-09-18
+
+Changement de modèle : une instance héberge plusieurs comptes ; chaque dirigeant connecte SA boîte Outlook et parle à EMA depuis son WhatsApp personnel vers UN numéro WhatsApp Business EMA. Le moteur (tools, Action Engine, validations, réconciliation, worker) est conservé.
+
+### Ajouté
+- **Comptes utilisateurs** (`users`, migration `010_users`) : email + mot de passe (scrypt, 12 caractères minimum), rôle `owner` / `user`, numéro de téléphone **E.164** normalisé (`src/lib/phone.ts`), `phone_verified`, `whatsapp_enabled`, `verified_at`. Numéro unique parmi les comptes actifs. Inscription depuis `/login` (premier compte libre, suivants si `ALLOW_SIGNUP=true`), connexion `POST /api/auth/login` (email + mot de passe), `POST /api/auth/register`, `GET /api/me`.
+- **Connexions Microsoft par utilisateur** (`connections`, remplace `oauth_tokens`) : tokens chiffrés AES-256-GCM, `provider_account_email`, `expires_at`, `status` (`active` / `revoked`). L'état OAuth anti-CSRF mémorise l'utilisateur qui lance le flux ; le callback lui attribue les tokens et revient sur Paramètres → Connexions. Scopes délégués `openid profile offline_access User.Read Mail.Send Mail.Read`. Refresh refusé (`invalid_grant`, `interaction_required`…) → connexion `revoked`, code **`MICROSOFT_RECONNECT`**, message « Votre connexion Microsoft a expiré ou a été révoquée. Reconnectez Outlook. »
+- **WhatsApp EMA central** : le webhook identifie l'expéditeur par son numéro (`identifySender`) ; numéro inconnu → message d'onboarding borné (3 / h), aucun appel Microsoft ni Claude, journal sans numéro complet (`UNKNOWN_USER`) ; numéro enregistré non vérifié → **activation** au premier message (« Bonjour EMA ») + bienvenue ; numéro désactivé → invitation à réactiver. `POST/DELETE /api/me/phone`, `src/integrations/whatsapp/activation.ts` (lien `wa.me` prérempli vers `WHATSAPP_BUSINESS_NUMBER`).
+- **Isolation par `user_id`** sur `emails`, `documents`, `actions`, `scheduled_followups`, `chat_messages`, `history` (héritage automatique depuis l'email source). `ToolContext.userId` fixé par le serveur, `assertOwned()` dans les tools, `ownedOr404()` dans les routes, listes filtrées dans les pages. Chaque exécuteur, la reprise et les relances utilisent la connexion du **propriétaire** de l'action. Un appel non scopé n'obtient une connexion que si l'instance n'en a qu'une seule.
+- **Worker** : synchronisation de **chaque** boîte connectée, curseur et état par utilisateur (`syncKeys`), une boîte en erreur n'empêche pas les autres. Notifications WhatsApp (validations, relances) envoyées au numéro vérifié du propriétaire.
+- **Interface** : `/login` (connexion / création de compte), **Paramètres → Connexions** (Outlook : Connecter / Connecté ✅ adresse / Déconnecter ; WhatsApp : numéro → Continuer → « Ouvrir WhatsApp » → Activé ✅ / Désactiver), nom du compte dans la navigation.
+- **Diagnostic** : contrôle « utilisateurs » (comptes, WhatsApp activés) et « Outlook » (boîtes connectées) ; journaux `whatsapp message identified` → `assistant turn` → tools → `reply sent`.
+- 17 tests (`tests/multi-user.test.ts`, 317 au total) couvrant les scénarios A (activation), B/F (deux utilisateurs simultanés, aucune fuite), C/D (recherche puis réponse validée envoyée depuis la bonne boîte), E (numéro inconnu), G (refresh), H (token révoqué), l'isolation des tools et du chat web.
+
+### Modifié
+- `APP_PASSWORD` et `WHATSAPP_APPROVER_PHONE` sont **obsolètes** (avertissement seulement ; le second ne sert plus qu'au message de test). WhatsApp est « configuré » avec token + numéro + verify token, sans numéro autorisé.
+- `CLAUDE.md` : décision multi-utilisateur consignée (remplace « une instance = une boîte »), règle 2 bis (identité serveur), §8 et §9 mis à jour. `ARCHITECTURE.md` §6 bis, `SECURITY.md` §1 bis, `docs/deployment.md` §7 bis, `docs/outlook.md`, `docs/whatsapp.md` §0, `docs/client-onboarding.md`.
+- Tests existants alignés : codes `MICROSOFT_RECONNECT`, scopes, état OAuth structuré, sessions porteuses du compte, numéro inconnu → `unknown_user`.
+
+### Migration
+- `010_users` : crée `users` et `connections`, copie l'ancienne ligne `oauth_tokens` dans `connections` (sans propriétaire, adoptée automatiquement par le premier compte créé), supprime `oauth_tokens`, ajoute `user_id` + index sur les tables métier. Les lignes antérieures restent `NULL` et visibles uniquement par un contexte non scopé.
+
 ## [1.0.2] — Phase 8A.1 — Corrections finales avant VPS — 2026-09-16
 
 Corrections uniquement : aucune nouvelle fonctionnalité, aucun changement d'architecture.

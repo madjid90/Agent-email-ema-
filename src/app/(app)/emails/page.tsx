@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, CategoryBadge, ConfidenceBadge, Empty, StatusBadge, UrgencyBadge, actionLabel } from "@/components/ui";
 import { getDb } from "@/database/connection";
+import { requireSessionUser } from "@/security/auth";
 import { listEmailsWithAnalysis, type EmailWithAnalysis } from "@/database/repositories/analyses";
 import { getSettings, getCompanies } from "@/lib/config";
 import { formatDateTime, formatAmount } from "@/lib/time";
@@ -41,8 +42,9 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const settings = getSettings();
   const tz = settings.company.timezone;
   const companies = new Map(getCompanies().map((c) => [c.id, c.name]));
-  const emails = listEmailsWithAnalysis({ limit: 300 }, db).filter((e) => belongs(e, tab));
-  const outlook = getOutlookStatus(db);
+  const user = await requireSessionUser(db);
+  const emails = listEmailsWithAnalysis({ limit: 300, userId: user.id }, db).filter((e) => belongs(e, tab));
+  const outlook = getOutlookStatus(db, user.id);
 
   return (
     <>

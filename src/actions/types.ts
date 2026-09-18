@@ -144,7 +144,7 @@ export interface ExecutionResult {
 
 export interface ActionExecutor<T extends ActionType = ActionType> {
   type: T;
-  execute(payload: ActionPayloadOutput<T>, ctx: { actionId: string; companyId: string | null; documentId: string | null; sourceEmailId: string | null }): Promise<ExecutionResult>;
+  execute(payload: ActionPayloadOutput<T>, ctx: { actionId: string; userId: string | null; companyId: string | null; documentId: string | null; sourceEmailId: string | null }): Promise<ExecutionResult>;
 }
 
 /** Transitions autorisées (ARCHITECTURE.md §5). */

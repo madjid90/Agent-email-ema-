@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, ConfidenceBadge, Empty, RiskBadge } from "@/components/ui";
 import { ApprovalCard } from "@/components/approval-card";
 import { getDb } from "@/database/connection";
+import { requireSessionUser } from "@/security/auth";
 import { listActions } from "@/database/repositories/actions";
 import { getLatestApprovalForAction } from "@/database/repositories/approvals";
 import { getEmail } from "@/database/repositories/emails";
@@ -29,14 +30,15 @@ const TYPE_LABEL: Record<string, string> = {
 import { formatDateOnly } from "@/lib/time";
 const DRAFT_TYPES = new Set(["reply_email", "send_email", "payment_request", "deposit_request", "send_followup"]);
 
-export default function ApprovalsPage() {
+export default async function ApprovalsPage() {
   const db = getDb();
+  const user = await requireSessionUser(db);
   const settings = getSettings();
   const tz = settings.company.timezone;
   const companies = new Map(getCompanies().map((c) => [c.id, c.name]));
   const whatsapp = isWhatsappConfigured();
-  const pending = listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 100 }, db);
-  const recent = listActions({ status: ["APPROVED", "EXECUTING", "COMPLETED", "REJECTED", "FAILED"], limit: 30 }, db).filter((a) => a.type !== "prepare_reply");
+  const pending = listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 100, userId: user.id }, db);
+  const recent = listActions({ status: ["APPROVED", "EXECUTING", "COMPLETED", "REJECTED", "FAILED"], limit: 30, userId: user.id }, db).filter((a) => a.type !== "prepare_reply");
 
   const renderAction = (a: ActionRow) => {
     const payload = parseJson<Record<string, unknown>>(a.payload, {});

@@ -50,6 +50,8 @@ export interface PrepareDeps {
   settings?: Settings;
   companies?: Company[];
   actor?: "ema" | "user";
+  /** Propriétaire de l'action créée (session / WhatsApp) ; à défaut, hérité de l'email. */
+  userId?: string | null;
 }
 
 /** Vérifications déterministes avant toute proposition de signature. */
@@ -160,7 +162,7 @@ export function prepareQuoteSignature(documentId: string, companyId: string | nu
   const amount = doc.amount_incl_tax !== null ? ` — ${formatAmount(doc.amount_incl_tax, doc.currency ?? "EUR")} TTC` : "";
   const action = proposeAction(
     { type: "sign_document", title: `Signer et retourner le devis ${supplier}${ref ? ` ${ref}` : ""}${amount} (${company.name})`, payload, sourceEmailId: email.id, companyId: company.id, documentId: doc.id, requiresApproval: true, actor: deps.actor ?? "ema" },
-    { db, settings },
+    { db, settings, userId: deps.userId },
   );
   documentsRepo.updateDocument(doc.id, { status: "sign_proposed", signed_action_id: action.id }, db);
   logHistory({ eventType: "signature.proposed", message: `Signature proposée : ${company.quoteApprovalText}, date, ${readiness.signatureLabel}${readiness.stampApplied ? `, ${readiness.stampLabel}` : ""}, retour à ${email.sender_email ?? "?"}${readiness.warnings.length ? ` — ${readiness.warnings.join(" ; ")}` : ""}`, actor: deps.actor ?? "ema", actionId: action.id, emailId: email.id, documentId: doc.id, details: { company_id: company.id, placement: company.signaturePlacement.mode, stamp: readiness.stampApplied } }, db);

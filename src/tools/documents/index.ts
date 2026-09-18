@@ -14,11 +14,12 @@ import { getLatestAnalysis } from "@/database/repositories/analyses";
 import { evaluateRules } from "@/agent/rules";
 import { resolvePaymentRecipient } from "@/documents/routing";
 import { proposeAction } from "@/actions/engine";
-import { actionRefSchema } from "../types";
+import { actionRefSchema, assertOwned } from "../types";
 import { formatAmount } from "@/lib/time";
 
-function requireDoc(id: string, db: Parameters<typeof documentsRepo.getDocument>[1]): DocumentRow {
+function requireDoc(id: string, db: Parameters<typeof documentsRepo.getDocument>[1], ctx: { userId?: string | null } = {}): DocumentRow {
   const d = documentsRepo.getDocument(id, db);
+  assertOwned(d, ctx, `Document ${id}`);
   if (!d) throw new EmaError("NOT_FOUND", `Document ${id} introuvable`);
   return d;
 }
@@ -82,7 +83,7 @@ export const extractPdfText = defineTool({
   input: z.object({ document_id: z.string(), max_chars: z.number().int().min(100).max(50000).default(15000) }),
   output: z.object({ text: z.string(), pages: z.number().int(), truncated: z.boolean(), status: z.string() }),
   handler: async (input, ctx) => {
-    const d = await ensureDocumentText(requireDoc(input.document_id, ctx.db), ctx.db);
+    const d = await ensureDocumentText(requireDoc(input.document_id, ctx.db, ctx), ctx.db);
     const text = d.extracted_text ?? "";
     return { text: text.slice(0, input.max_chars), pages: d.text_pages ?? 0, truncated: text.length > input.max_chars, status: d.text_status };
   },
@@ -96,7 +97,7 @@ export const classifyDocument = defineTool({
   input: z.object({ document_id: z.string() }),
   output: z.object({ type: documentTypeSchema, confidence: z.number().min(0).max(1), source: z.enum(["analysis", "heuristic"]) }),
   handler: async (input, ctx) => {
-    const d = await ensureDocumentText(requireDoc(input.document_id, ctx.db), ctx.db);
+    const d = await ensureDocumentText(requireDoc(input.document_id, ctx.db, ctx), ctx.db);
     if (d.doc_type && d.doc_confidence !== null) return { type: documentTypeSchema.parse(d.doc_type), confidence: d.doc_confidence, source: "analysis" as const };
     const hint = classifyDocumentHeuristic(d.name, d.extracted_text);
     return { type: hint.type, confidence: Math.min(0.5, hint.score / 10), source: "heuristic" as const };
@@ -111,8 +112,8 @@ export const extractInvoiceData = defineTool({
   input: z.object({ document_id: z.string() }),
   output: docSummarySchema.extend({ vat_amount: z.number().nullable(), warnings: z.array(z.string()), summary: z.string().nullable() }),
   handler: async (input, ctx) => {
-    const d = requireDoc(input.document_id, ctx.db);
-    const r = d.analyzed_at ? { document: d, extraction: readExtraction(d) } : await analyzeDocument(d.id, { db: ctx.db, settings: ctx.settings, companies: ctx.companies });
+    const d = requireDoc(input.document_id, ctx.db, ctx);
+    const r = d.analyzed_at ? { document: d, extraction: readExtraction(d) } : await analyzeDocument(d.id, { db: ctx.db, settings: ctx.settings, companies: ctx.companies, userId: ctx.userId });
     return { ...toSummary(r.document, ctx.db), vat_amount: r.extraction?.vat_amount ?? null, warnings: r.extraction?.warnings ?? [], summary: r.extraction?.summary ?? null };
   },
 });
@@ -125,8 +126,8 @@ export const extractQuoteData = defineTool({
   input: z.object({ document_id: z.string() }),
   output: docSummarySchema.extend({ signature_requested: z.boolean(), summary: z.string().nullable() }),
   handler: async (input, ctx) => {
-    const d = requireDoc(input.document_id, ctx.db);
-    const r = d.analyzed_at ? { document: d, extraction: readExtraction(d) } : await analyzeDocument(d.id, { db: ctx.db, settings: ctx.settings, companies: ctx.companies });
+    const d = requireDoc(input.document_id, ctx.db, ctx);
+    const r = d.analyzed_at ? { document: d, extraction: readExtraction(d) } : await analyzeDocument(d.id, { db: ctx.db, settings: ctx.settings, companies: ctx.companies, userId: ctx.userId });
     const text = (r.document.extracted_text ?? "").toLowerCase();
     return { ...toSummary(r.document, ctx.db), signature_requested: /bon pour accord|retour(ner)? sign|signature/.test(text), summary: r.extraction?.summary ?? null };
   },
@@ -140,7 +141,7 @@ export const archiveDocument = defineTool({
   input: z.object({ document_id: z.string(), category: z.enum(["invoice", "quote", "signed", "other"]), company_id: z.string().nullable().default(null) }),
   output: z.object({ document_id: z.string(), category: z.string() }),
   handler: async (input, ctx) => {
-    const d = requireDoc(input.document_id, ctx.db);
+    const d = requireDoc(input.document_id, ctx.db, ctx);
     if (input.company_id && !ctx.companies.some((c) => c.id === input.company_id)) throw new EmaError("VALIDATION", `Société inconnue : ${input.company_id}`);
     documentsRepo.updateDocument(d.id, { category: input.category, company_id: input.company_id, status: "archived" }, ctx.db);
     logHistory({ eventType: "document.archived", message: `Document ${d.name} archivé (${input.category})`, documentId: d.id, emailId: d.email_id }, ctx.db);
@@ -156,7 +157,7 @@ export const searchDocuments = defineTool({
   input: z.object({ query: z.string().optional(), supplier: z.string().optional(), invoice_number: z.string().optional(), document_type: documentTypeSchema.optional(), since: z.string().optional(), requires_review: z.boolean().optional(), possible_duplicate: z.boolean().optional(), max: z.number().int().min(1).max(50).default(20) }),
   output: z.array(docSummarySchema),
   handler: async (input, ctx) =>
-    documentsRepo.searchDocuments({ query: input.query, supplier: input.supplier, invoiceNumber: input.invoice_number, docType: input.document_type, since: input.since, requiresReview: input.requires_review, possibleDuplicate: input.possible_duplicate, limit: input.max }, ctx.db).map((d) => toSummary(d, ctx.db)),
+    documentsRepo.searchDocuments({ userId: ctx.userId ?? undefined, query: input.query, supplier: input.supplier, invoiceNumber: input.invoice_number, docType: input.document_type, since: input.since, requiresReview: input.requires_review, possibleDuplicate: input.possible_duplicate, limit: input.max }, ctx.db).map((d) => toSummary(d, ctx.db)),
 });
 
 export const getDocument = defineTool({
@@ -167,7 +168,7 @@ export const getDocument = defineTool({
   input: z.object({ document_id: z.string() }),
   output: docSummarySchema.extend({ warnings: z.array(z.string()), summary: z.string().nullable(), text_status: z.string() }),
   handler: async (input, ctx) => {
-    const d = requireDoc(input.document_id, ctx.db);
+    const d = requireDoc(input.document_id, ctx.db, ctx);
     const x = readExtraction(d);
     return { ...toSummary(d, ctx.db), warnings: x?.warnings ?? [], summary: x?.summary ?? null, text_status: d.text_status };
   },
@@ -181,7 +182,7 @@ export const listPendingActions = defineTool({
   input: z.object({ max: z.number().int().min(1).max(50).default(20) }),
   output: z.array(z.object({ action_id: z.string(), type: z.string(), title: z.string(), status: z.string(), risk_level: z.string(), email_id: z.string().nullable(), document_id: z.string().nullable(), created_at: z.string() })),
   handler: async (input, ctx) =>
-    listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: input.max }, ctx.db).map((a) => ({ action_id: a.id, type: a.type, title: a.title, status: a.status, risk_level: a.risk_level, email_id: a.source_email_id, document_id: a.document_id, created_at: a.created_at })),
+    listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: input.max, userId: ctx.userId ?? undefined }, ctx.db).map((a) => ({ action_id: a.id, type: a.type, title: a.title, status: a.status, risk_level: a.risk_level, email_id: a.source_email_id, document_id: a.document_id, created_at: a.created_at })),
 });
 
 export const prepareDocumentForward = defineTool({
@@ -192,7 +193,7 @@ export const prepareDocumentForward = defineTool({
   input: z.object({ document_id: z.string(), comment: z.string().optional() }),
   output: actionRefSchema.extend({ to: z.array(z.string()), rule_id: z.string().nullable(), comment: z.string() }),
   handler: async (input, ctx) => {
-    const d = requireDoc(input.document_id, ctx.db);
+    const d = requireDoc(input.document_id, ctx.db, ctx);
     if (!d.email_id) throw new EmaError("VALIDATION", "Ce document n'est rattaché à aucun email : transfert impossible");
     const email = emailsRepo.getEmail(d.email_id, ctx.db);
     if (!email) throw new EmaError("NOT_FOUND", `Email ${d.email_id} introuvable`);
@@ -223,7 +224,7 @@ export const prepareDocumentForward = defineTool({
         requiresApproval: true,
         actor: "user",
       },
-      { db: ctx.db, settings: ctx.settings },
+      { db: ctx.db, settings: ctx.settings, userId: ctx.userId },
     );
     logHistory({ eventType: "rule.applied", message: `Transfert préparé vers ${to}${outcome.forwardRule ? ` (règle ${outcome.forwardRule.id})` : " (contact interne)"}`, actor: "user", actionId: a.id, emailId: email.id, documentId: d.id }, ctx.db);
     return { action_id: a.id, status: a.status, requires_approval: a.requires_approval === 1, to: [to], rule_id: outcome.forwardRule?.id ?? null, comment };

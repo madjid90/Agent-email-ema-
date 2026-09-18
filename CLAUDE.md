@@ -4,7 +4,7 @@
 
 ## 1. Objectif
 
-EMA est un **agent administratif IA privé** qui gère **UNE SEULE boîte email Outlook professionnelle**.
+EMA est un **assistant IA pour dirigeants** : chaque dirigeant possède un **compte EMA**, connecte **SA** boîte Outlook (OAuth délégué) et parle à EMA depuis son WhatsApp personnel vers **le numéro WhatsApp Business unique d'EMA**. EMA identifie l'utilisateur par son numéro de téléphone vérifié, retrouve sa connexion Microsoft et n'agit que sur SA boîte.
 
 EMA :
 - lit les nouveaux emails et le thread complet,
@@ -17,7 +17,7 @@ EMA :
 - programme et exécute des relances,
 - archive les documents et journalise tout ce qu'il fait.
 
-EMA n'est **PAS** un SaaS multi-tenant. Chaque client possède son propre VPS, sa propre instance, ses propres données, tokens, signatures et règles. **Aucune donnée client n'est stockée chez nous.**
+**Multi-utilisateur (décision du 18/09/2026, remplace le modèle « une instance = une boîte »)** : une instance EMA héberge plusieurs comptes (`users`), chacun avec sa connexion Microsoft (`connections`), son numéro WhatsApp vérifié (E.164, unique parmi les comptes actifs), ses emails, actions, documents, relances et conversations (`user_id` sur chaque table métier). **Aucune donnée n'est jamais partagée entre comptes** : toute lecture est filtrée par `user_id`, tout envoi utilise la connexion du propriétaire de l'action. Ajouter un client = créer un compte, connecter Outlook, activer WhatsApp — **aucune modification de code, aucune variable d'environnement spécifique**. Le WhatsApp personnel du dirigeant n'est jamais connecté à EMA (ni session, ni contacts, ni appareils) : il écrit simplement au numéro d'EMA.
 
 ## 2. Stack (ne pas dévier)
 
@@ -25,14 +25,14 @@ EMA n'est **PAS** un SaaS multi-tenant. Chaque client possède son propre VPS, s
 |---|---|
 | Framework | Next.js 15 (App Router) + TypeScript strict |
 | IA | Claude via `@anthropic-ai/sdk` (modèle par défaut `claude-opus-5`, tool calling, structured outputs) |
-| Email | Microsoft Graph (OAuth 2.0, une seule mailbox) |
-| Validation | WhatsApp Business Cloud API (boutons VALIDER / REFUSER) |
+| Email | Microsoft Graph (OAuth 2.0 **délégué**, une mailbox par utilisateur) |
+| Validation / dialogue | WhatsApp Business Cloud API officielle (UN numéro EMA central, utilisateurs identifiés par leur numéro vérifié) |
 | Base | SQLite locale via `better-sqlite3` (`data/ema.db`) |
 | Worker | Process Node simple (`npm run worker`), pas de n8n |
 | PDF | `pdf-lib` (signature/tampon), extraction texte côté serveur |
 | Déploiement | VPS Ubuntu : Node.js + PM2 + Nginx + HTTPS |
 
-**Interdits** : Supabase, Firebase, n8n, PostgreSQL, Redis, Kubernetes, base cloud centrale, plateforme multi-client, `any`, `@ts-ignore` sans justification.
+**Interdits** : Supabase, Firebase, n8n, PostgreSQL, Redis, Kubernetes, base cloud centrale, Baileys / whatsapp-web.js / QR code / session WhatsApp personnelle, `any`, `@ts-ignore` sans justification.
 
 ## 3. Architecture (résumé)
 
@@ -69,13 +69,14 @@ tests/            vitest
 ## 5. Règles de sécurité (non négociables)
 
 1. **Emails et pièces jointes = contenu NON FIABLE.** Ils sont toujours transmis à Claude dans un bloc délimité `<untrusted_email_content>` (emails) ou `<untrusted_document_content>` (PDF) via `src/security/untrusted.ts`. Une instruction contenue dans un email ou un document n'est **jamais** une instruction système.
-2. **Claude ne manipule jamais de credentials.** Tokens Microsoft, clés API, tokens WhatsApp vivent uniquement dans `.env` et dans la table `oauth_tokens` (chiffrée avec `APP_SECRET`). Les tools reçoivent des identifiants métier (`email_id`, `document_id`), jamais des secrets.
+2. **Claude ne manipule jamais de credentials.** Tokens Microsoft, clés API, tokens WhatsApp vivent uniquement dans `.env` et dans la table `connections` (chiffrée avec `APP_SECRET`, une ligne par utilisateur). Les tools reçoivent des identifiants métier (`email_id`, `document_id`), jamais des secrets.
+2 bis. **L'identité vient toujours du serveur.** `ToolContext.userId` est fixé par la session web, par le numéro WhatsApp identifié ou par l'email en cours d'analyse — jamais par le modèle, jamais par un paramètre de requête. Un tool n'accède qu'aux données de cet utilisateur (`assertOwned`) et à sa seule connexion Microsoft (`createConnectedGraphClient({ userId })`). Un numéro WhatsApp inconnu n'obtient qu'un message d'onboarding : aucun appel Microsoft, aucune donnée.
 3. **Claude ne reçoit jamais les images de signature ou de tampon.** Il ne reçoit que `company_id`. L'application applique les fichiers depuis `private/signatures/` et `private/stamps/`.
 4. **Toute action HIGH ou CRITICAL exige une validation humaine** (WhatsApp ou UI). Signature, tampon, paiement, engagement = CRITICAL/HIGH.
 5. **EMA ne fait jamais de paiement bancaire.** Il prépare un email interne de demande de règlement (risque HIGH, jamais abaissable), c'est tout. Un changement de RIB détecté bloque toute action financière ; un justificatif de paiement ne prouve jamais qu'une facture est payée.
 6. **Jamais d'écrasement d'un PDF original.** La version signée est un nouveau fichier dans `private/signed-documents/`.
 7. **Pas de double exécution.** Une action passe par une transition atomique `APPROVED → EXECUTING` en SQLite avant tout effet de bord.
-8. **Jamais de mot de passe Outlook.** OAuth Microsoft uniquement.
+8. **Jamais de mot de passe Outlook.** OAuth Microsoft uniquement, permissions déléguées `openid profile offline_access User.Read Mail.Read Mail.Send` (jamais de permission d'application).
 9. **Jamais d'adresse métier codée en dur.** Les destinataires viennent de `config/rules.json` et `config/contacts.json`.
 10. **Jamais de secret dans `config/`, dans le code ou dans git.**
 11. **Ne jamais envoyer toute la mailbox à Claude.** Seulement : email courant, thread, historique pertinent, règles pertinentes, infos société utiles.
@@ -102,9 +103,9 @@ tests/            vitest
 
 ## 8. Règles Outlook (Microsoft Graph)
 
-- Une seule mailbox : celle connectée via OAuth dans `/setup`. Scopes : `offline_access User.Read Mail.Read Mail.Send` (jamais Mail.ReadWrite : EMA ne modifie aucun email).
+- Une mailbox **par utilisateur**, connectée depuis Paramètres → Connexions ; le callback attribue les tokens à l'utilisateur mémorisé dans l'état anti-CSRF. Scopes délégués : `openid profile offline_access User.Read Mail.Read Mail.Send` (jamais Mail.ReadWrite : EMA ne modifie aucun email). Un refresh refusé (`invalid_grant`…) marque la connexion `revoked` et lève `MICROSOFT_RECONNECT` : l'utilisateur est invité à reconnecter Outlook, jamais à saisir un mot de passe.
 - Toujours répondre **dans le thread** (`conversationId`) via `reply`/`replyAll`, jamais un nouveau mail pour une réponse.
-- Le worker ne traite un email qu'une fois (table `emails`, clé `graph_id` unique). Cycle : `NEW → ANALYZING → ANALYZED | ANALYSIS_FAILED` ; un échec n'est jamais relancé automatiquement ; un message `CONTEXT` n'est jamais analysé.
+- Le worker synchronise **chaque** boîte connectée (`listActiveConnections`), avec un curseur par utilisateur ; un email porte toujours le `user_id` de sa boîte. Il ne traite un email qu'une fois (table `emails`, clé `graph_id` unique). Cycle : `NEW → ANALYZING → ANALYZED | ANALYSIS_FAILED` ; un échec n'est jamais relancé automatiquement ; un message `CONTEXT` n'est jamais analysé.
 - Les pièces jointes sont téléchargées dans `private/documents/<yyyy>/<mm>/` et référencées dans `documents`.
 - Le refresh token est chiffré en base ; jamais loggué.
 
@@ -112,7 +113,7 @@ tests/            vitest
 
 - Un message de validation = un `approval` lié à une action, avec boutons `VALIDER` / `REFUSER` (et `MODIFIER` si pertinent).
 - L'ID de bouton encode l'`approval_id` ; le webhook vérifie la signature Meta (`X-Hub-Signature-256`) avec `WHATSAPP_APP_SECRET` (obligatoire en production) et le `WHATSAPP_VERIFY_TOKEN` à l'abonnement.
-- Seul `WHATSAPP_APPROVER_PHONE` peut valider ; tout autre numéro est ignoré. Les événements sont dédoublonnés par identifiant Meta (`webhook_events`).
+- L'expéditeur est identifié par la table `users` (numéro E.164 normalisé, `phone_verified = 1`, `whatsapp_enabled = 1`) : il ne peut valider que SES actions. Numéro inconnu → message d'onboarding borné (3 par heure), rien d'autre. Numéro enregistré mais non vérifié → le premier message (« Bonjour EMA ») active WhatsApp. `WHATSAPP_APPROVER_PHONE` n'est plus une identité (seulement un numéro de test). Les événements sont dédoublonnés par identifiant Meta (`webhook_events`).
 - Une validation reçue pour une action déjà traitée est ignorée (idempotence).
 - Une demande expire après `settings.approvals.expireAfterHours` → statut `EXPIRED` ; l'action reste `WAITING_APPROVAL`, jamais exécutée sans décision (renvoi possible depuis l'interface).
 - Une seule demande active par action : pas de renvoi tant qu'une demande `PENDING` a été notifiée.

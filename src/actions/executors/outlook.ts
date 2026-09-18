@@ -30,11 +30,12 @@ export interface OutlookExecutorDeps {
   settings?: Settings;
 }
 
-function deps(d: OutlookExecutorDeps): { db: Db; client: GraphClient; now: () => Date; sources: RecipientSources } {
+function deps(d: OutlookExecutorDeps, userId: string | null): { db: Db; client: GraphClient; now: () => Date; sources: RecipientSources } {
   const db = d.db ?? getDb();
   return {
     db,
-    client: d.client ?? createConnectedGraphClient({ db }),
+    // La boîte utilisée est celle du propriétaire de l'action — jamais une autre.
+    client: d.client ?? createConnectedGraphClient({ db, userId: userId ?? undefined }),
     now: d.now ?? (() => new Date()),
     sources: { db, contacts: d.contacts, rules: d.rules, settings: d.settings },
   };
@@ -74,15 +75,15 @@ export function loadOutgoingAttachments(documentIds: string[], db: Db): Outgoing
 }
 
 /** Trace le message envoyé (Sent Items) comme email sortant du thread, best effort. */
-async function recordSentMessage(client: GraphClient, db: Db, conversationId: string | null, since: string): Promise<string | null> {
+async function recordSentMessage(client: GraphClient, db: Db, conversationId: string | null, since: string, userId: string | null): Promise<string | null> {
   if (!conversationId) return null;
   try {
     const sent = await findLatestSentInConversation(client, conversationId, since);
     if (!sent) return null;
     const existing = emailsRepo.getEmailByGraphId(sent.id, db);
     if (existing) return existing.id;
-    const accountEmail = loadTokenSet(db)?.accountEmail ?? null;
-    return emailsRepo.insertEmail(toNewEmail(sent, { accountEmail, direction: "outbound", status: "PROCESSED" }), db).id;
+    const accountEmail = loadTokenSet(db, userId ?? undefined)?.accountEmail ?? null;
+    return emailsRepo.insertEmail({ ...toNewEmail(sent, { accountEmail, direction: "outbound", status: "PROCESSED" }), userId }, db).id;
   } catch (err) {
     log.warn("could not record sent message", { message: err instanceof Error ? err.message : String(err) });
     return null;
@@ -92,12 +93,12 @@ async function recordSentMessage(client: GraphClient, db: Db, conversationId: st
 export function createOutlookExecutors(d: OutlookExecutorDeps = {}): ActionExecutor[] {
   const replyEmail: ActionExecutor<"reply_email"> = {
     type: "reply_email",
-    async execute(payload): Promise<ExecutionResult> {
-      const { db, client, now } = deps(d);
+    async execute(payload, ctx): Promise<ExecutionResult> {
+      const { db, client, now } = deps(d, ctx.userId);
       const email = requireEmail(payload.email_id, db);
       const since = new Date(now().getTime() - 60_000).toISOString();
       await replyToMessage(client, email.graph_id, { comment: payload.body, replyAll: payload.reply_all, attachments: loadOutgoingAttachments(payload.attachments, db) });
-      const sentId = await recordSentMessage(client, db, email.thread_id, since);
+      const sentId = await recordSentMessage(client, db, email.thread_id, since, ctx.userId);
       emailsRepo.updateEmailStatus(email.id, "PROCESSED", db);
       return { ok: true, summary: `Réponse envoyée à ${email.sender_email ?? "?"} — ${email.subject}`, data: { sent_email_id: sentId } };
     },
@@ -105,14 +106,14 @@ export function createOutlookExecutors(d: OutlookExecutorDeps = {}): ActionExecu
 
   const forwardEmail: ActionExecutor<"forward_email"> = {
     type: "forward_email",
-    async execute(payload): Promise<ExecutionResult> {
-      const { db, client, now, sources } = deps(d);
+    async execute(payload, ctx): Promise<ExecutionResult> {
+      const { db, client, now, sources } = deps(d, ctx.userId);
       const email = requireEmail(payload.email_id, db);
       // Second rempart : le destinataire doit venir des règles, des contacts ou du thread.
       validateOutboundRecipients(payload.to, { ...sources, threadEmail: email });
       const since = new Date(now().getTime() - 60_000).toISOString();
       await forwardMessage(client, email.graph_id, { to: payload.to, comment: payload.comment });
-      const sentId = await recordSentMessage(client, db, email.thread_id, since);
+      const sentId = await recordSentMessage(client, db, email.thread_id, since, ctx.userId);
       emailsRepo.updateEmailStatus(email.id, "PROCESSED", db);
       return { ok: true, summary: `Email transféré à ${payload.to.join(", ")} — ${email.subject}`, data: { sent_email_id: sentId } };
     },
@@ -120,8 +121,8 @@ export function createOutlookExecutors(d: OutlookExecutorDeps = {}): ActionExecu
 
   const sendEmail: ActionExecutor<"send_email"> = {
     type: "send_email",
-    async execute(payload): Promise<ExecutionResult> {
-      const { db, client, sources } = deps(d);
+    async execute(payload, ctx): Promise<ExecutionResult> {
+      const { db, client, sources } = deps(d, ctx.userId);
       validateOutboundRecipients(payload.to, sources);
       await sendMail(client, { to: payload.to, subject: payload.subject, body: payload.body, attachments: loadOutgoingAttachments(payload.attachments, db) });
       return { ok: true, summary: `Email envoyé à ${payload.to.join(", ")} — ${payload.subject}` };
@@ -130,8 +131,8 @@ export function createOutlookExecutors(d: OutlookExecutorDeps = {}): ActionExecu
 
   const paymentRequest: ActionExecutor<"payment_request"> = {
     type: "payment_request",
-    async execute(payload): Promise<ExecutionResult> {
-      const { client, sources } = deps(d);
+    async execute(payload, ctx): Promise<ExecutionResult> {
+      const { client, sources } = deps(d, ctx.userId);
       validateOutboundRecipients(payload.to, sources);
       await sendMail(client, { to: payload.to, subject: payload.subject, body: payload.body });
       return { ok: true, summary: `Demande de règlement envoyée à ${payload.to.join(", ")}` };

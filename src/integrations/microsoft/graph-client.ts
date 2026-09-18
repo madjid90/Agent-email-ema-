@@ -2,7 +2,7 @@ import type { Db } from "@/database/connection";
 import { getDb } from "@/database/connection";
 import { EmaError } from "@/lib/errors";
 import { createLogger } from "@/lib/logger";
-import { loadTokenSet, saveTokenSet } from "./token-store";
+import { loadTokenSet, markTokenRevoked, saveTokenSet } from "./token-store";
 import { refreshTokenSet } from "./oauth";
 import type { GraphErrorBody, GraphPage } from "./types";
 
@@ -221,26 +221,57 @@ export interface ConnectedClientDeps {
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /**
+   * Utilisateur dont la boîte est utilisée. Toujours fourni par le serveur
+   * (session, action, relance) — jamais par le modèle. `undefined` = appel non
+   * scopé, accepté uniquement si l'instance n'a qu'une seule connexion.
+   */
+  userId?: string | null;
 }
 
+export const RECONNECT_MESSAGE = "Votre connexion Microsoft a expiré ou a été révoquée. Reconnectez Outlook depuis Paramètres → Connexions.";
+
+/** Codes renvoyés par Microsoft quand le refresh token ne vaut plus rien. */
+const REVOKED_CODES = new Set(["invalid_grant", "interaction_required", "consent_required", "login_required", "unauthorized_client"]);
+
 /**
- * Client relié à oauth_tokens : rafraîchit le token avant expiration (marge de
- * 2 minutes) et sur 401. Lève NOT_FOUND/CONFIG si Outlook n'est pas connecté.
+ * Client relié à `connections` : rafraîchit le token avant expiration (marge de
+ * 2 minutes) et sur 401. Lève MICROSOFT_RECONNECT si Outlook n'est pas connecté
+ * ou si Microsoft a révoqué l'autorisation (la connexion est alors marquée
+ * `revoked` et l'utilisateur est invité à reconnecter, jamais à ressaisir un
+ * mot de passe dans EMA).
  */
 export function createConnectedGraphClient(deps: ConnectedClientDeps = {}): GraphClient {
   const db = deps.db ?? getDb();
   const now = deps.now ?? Date.now;
+  const userId = deps.userId;
   let refreshing: Promise<string> | null = null;
+
+  const load = () => {
+    const stored = loadTokenSet(db, userId);
+    if (!stored) throw new EmaError("MICROSOFT_RECONNECT", "Outlook n'est pas connecté. Connectez Outlook depuis Paramètres → Connexions.");
+    if (stored.status === "revoked") throw new EmaError("MICROSOFT_RECONNECT", RECONNECT_MESSAGE);
+    return stored;
+  };
 
   const refresh = async (): Promise<string> => {
     if (refreshing) return refreshing;
     refreshing = (async () => {
-      const stored = loadTokenSet(db);
-      if (!stored) throw new EmaError("CONFIG", "Outlook n'est pas connecté");
-      const fresh = await refreshTokenSet(stored.set.refreshToken, { db, fetchImpl: deps.fetchImpl, now });
-      saveTokenSet(fresh, stored.accountEmail, db);
-      log.info("token refreshed", { expiresAt: fresh.expiresAt });
-      return fresh.accessToken;
+      const stored = load();
+      try {
+        const fresh = await refreshTokenSet(stored.set.refreshToken, { db, fetchImpl: deps.fetchImpl, now });
+        saveTokenSet(fresh, stored.accountEmail, db, stored.userId);
+        log.info("token refreshed", { userId: stored.userId, expiresAt: fresh.expiresAt });
+        return fresh.accessToken;
+      } catch (err) {
+        const code = err instanceof EmaError && err.details && typeof err.details === "object" ? String((err.details as { code?: unknown }).code ?? "") : "";
+        if (REVOKED_CODES.has(code)) {
+          markTokenRevoked(stored.connectionId, code, db);
+          log.warn("microsoft token revoked", { userId: stored.userId, code });
+          throw new EmaError("MICROSOFT_RECONNECT", RECONNECT_MESSAGE, { cause: err });
+        }
+        throw err;
+      }
     })().finally(() => {
       refreshing = null;
     });
@@ -251,8 +282,7 @@ export function createConnectedGraphClient(deps: ConnectedClientDeps = {}): Grap
     fetchImpl: deps.fetchImpl,
     sleep: deps.sleep,
     getAccessToken: async () => {
-      const stored = loadTokenSet(db);
-      if (!stored) throw new EmaError("CONFIG", "Outlook n'est pas connecté");
+      const stored = load();
       if (new Date(stored.set.expiresAt).getTime() - now() < REFRESH_MARGIN_MS) return refresh();
       return stored.set.accessToken;
     },
@@ -267,6 +297,8 @@ export function createConnectedGraphClient(deps: ConnectedClientDeps = {}): Grap
   });
 }
 
-export function isOutlookConnected(db: Db = getDb()): boolean {
-  return loadTokenSet(db) !== null;
+/** `true` si une connexion ACTIVE existe pour cet utilisateur (ou l'unique connexion de l'instance). */
+export function isOutlookConnected(db: Db = getDb(), userId?: string | null): boolean {
+  const stored = loadTokenSet(db, userId);
+  return stored !== null && stored.status === "active";
 }

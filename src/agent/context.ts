@@ -145,6 +145,6 @@ export function renderUntrustedContext(ctx: EmailContext): string {
   return parts.join("\n\n");
 }
 
-export function toolContextFor(mode: "analyze" | "chat" | "followup" | "internal", currentEmailId?: string | null, db: Db = getDb()) {
-  return { db, settings: getSettings(), rules: getRules(), companies: getCompanies(), contacts: getContacts(), mode, currentEmailId: currentEmailId ?? null };
+export function toolContextFor(mode: "analyze" | "chat" | "followup" | "internal", currentEmailId?: string | null, db: Db = getDb(), userId?: string | null) {
+  return { db, settings: getSettings(), rules: getRules(), companies: getCompanies(), contacts: getContacts(), mode, currentEmailId: currentEmailId ?? null, userId: userId ?? null };
 }

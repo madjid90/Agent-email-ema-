@@ -47,9 +47,9 @@ function resolve(deps: RecoveryDeps): { db: Db; settings: Settings; now: Date } 
   return { db: deps.db ?? getDb(), settings: deps.settings ?? getSettings(), now: deps.now ? deps.now() : new Date() };
 }
 
-function graphOf(deps: RecoveryDeps, db: Db): GraphClient | null {
+function graphOf(deps: RecoveryDeps, db: Db, userId: string | null): GraphClient | null {
   if (deps.client !== undefined) return deps.client;
-  return isOutlookConnected(db) ? createConnectedGraphClient({ db }) : null;
+  return isOutlookConnected(db, userId ?? undefined) ? createConnectedGraphClient({ db, userId: userId ?? undefined }) : null;
 }
 
 /** Fenêtre de recherche : un peu avant le début d'exécution. */
@@ -79,7 +79,7 @@ function signedAttachmentName(action: ActionRow, db: Db): string | null {
  */
 export async function reconcileAction(action: ActionRow, deps: RecoveryDeps = {}): Promise<ReconcileResult> {
   const { db } = resolve(deps);
-  const client = graphOf(deps, db);
+  const client = graphOf(deps, db, action.user_id);
   if (!client) return { verdict: "unknown", message: null, detail: "Outlook n'est pas connecté : vérification impossible" };
   const payload = parseJson<Record<string, unknown>>(action.payload, {});
   const since = searchSince(action);

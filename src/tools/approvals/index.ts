@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineTool } from "../types";
+import { defineTool, assertOwned } from "../types";
 import * as approvalsRepo from "@/database/repositories/approvals";
 import * as actionsRepo from "@/database/repositories/actions";
 import { EmaError } from "@/lib/errors";
@@ -20,6 +20,7 @@ export const requestApproval = defineTool({
   output: z.object({ approval_id: z.string(), status: z.string() }),
   handler: async (input, ctx) => {
     const action = actionsRepo.getAction(input.action_id, ctx.db);
+    assertOwned(action, ctx, `Action ${input.action_id}`);
     if (!action) throw new EmaError("NOT_FOUND", `Action ${input.action_id} introuvable`);
     const pending = approvalsRepo.getPendingApprovalForAction(action.id, ctx.db);
     if (!pending) throw new EmaError("CONFLICT", "Aucune validation en attente pour cette action");
@@ -56,11 +57,12 @@ export const updateDraft = defineTool({
   output: z.object({ action_id: z.string(), status: z.string(), requires_approval: z.boolean(), body: z.string(), subject: z.string().nullable(), to: z.array(z.string()) }),
   handler: async (input, ctx) => {
     const action = actionsRepo.getAction(input.action_id, ctx.db);
+    assertOwned(action, ctx, `Action ${input.action_id}`);
     if (!action) throw new EmaError("NOT_FOUND", `Action ${input.action_id} introuvable`);
     if (action.type === "sign_document") throw new EmaError("VALIDATION", "Le contenu d'une demande de signature ne se modifie pas : refusez-la et préparez-en une nouvelle");
     const patch: Record<string, unknown> = { body: input.body };
     if (input.subject) patch.subject = input.subject;
-    const updated = editActionPayload(action.id, patch, "user", { db: ctx.db, settings: ctx.settings });
+    const updated = editActionPayload(action.id, patch, "user", { db: ctx.db, settings: ctx.settings, userId: ctx.userId });
     const payload = parseJson<Record<string, unknown>>(updated.payload, {});
     return {
       action_id: updated.id,

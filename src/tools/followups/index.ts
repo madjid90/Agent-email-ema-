@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineTool } from "../types";
+import { defineTool, assertOwned } from "../types";
 import * as followupsRepo from "@/database/repositories/followups";
 import * as emailsRepo from "@/database/repositories/emails";
 import { EmaError } from "@/lib/errors";
@@ -55,7 +55,7 @@ export const scheduleFollowup = defineTool({
   output: z.object({ followup_id: z.string(), execute_at: z.string(), execute_at_local: z.string(), kind: z.string(), recipient: z.string().nullable() }),
   handler: async (input, ctx) => {
     if (input.kind === "EXTERNAL_FOLLOWUP" && !input.email_id) throw new EmaError("VALIDATION", "Une relance externe doit être rattachée à un email");
-    if (input.email_id && !emailsRepo.getEmail(input.email_id, ctx.db)) throw new EmaError("NOT_FOUND", `Email ${input.email_id} introuvable`);
+    if (input.email_id) assertOwned(emailsRepo.getEmail(input.email_id, ctx.db), ctx, `Email ${input.email_id}`);
     const f = scheduleFollowupService(
       {
         emailId: input.email_id,
@@ -67,7 +67,7 @@ export const scheduleFollowup = defineTool({
         companyId: input.company_id,
         createdBy: ctx.mode === "chat" ? "user" : "ema",
       },
-      { db: ctx.db, settings: ctx.settings },
+      { db: ctx.db, settings: ctx.settings, userId: ctx.userId },
     );
     return { followup_id: f.id, execute_at: f.execute_at, execute_at_local: formatDateTime(f.execute_at, ctx.settings.company.timezone), kind: f.kind, recipient: f.recipient };
   },
@@ -87,7 +87,7 @@ export const listFollowups = defineTool({
   handler: async (input, ctx) => {
     const now = new Date();
     const endOfDay = new Date(now.getTime() + 24 * 3600 * 1000).toISOString();
-    const base = { kind: input.kind ?? undefined, limit: input.max };
+    const base = { kind: input.kind ?? undefined, limit: input.max, userId: ctx.userId ?? undefined };
     const rows =
       input.scope === "today"
         ? followupsRepo.listFollowups({ ...base, status: ["SCHEDULED", "CHECK_FAILED", "REMINDED"], dueBefore: endOfDay }, ctx.db)
@@ -124,7 +124,8 @@ export const postponeFollowupTool = defineTool({
   input: z.object({ followup_id: z.string(), when: whenSchema.nullable().default(null) }),
   output: z.object({ followup_id: z.string(), status: z.string(), execute_at: z.string() }),
   handler: async (input, ctx) => {
-    const f = postponeFollowup(input.followup_id, input.when, { db: ctx.db, settings: ctx.settings, actor: ctx.mode === "chat" ? "user" : "ema" });
+    assertOwned(followupsRepo.getFollowup(input.followup_id, ctx.db), ctx, `Relance ${input.followup_id}`);
+    const f = postponeFollowup(input.followup_id, input.when, { db: ctx.db, settings: ctx.settings, userId: ctx.userId, actor: ctx.mode === "chat" ? "user" : "ema" });
     return { followup_id: f.id, status: f.status, execute_at: formatDateTime(f.execute_at, ctx.settings.company.timezone) };
   },
 });
@@ -137,7 +138,8 @@ export const cancelFollowup = defineTool({
   input: z.object({ followup_id: z.string(), reason: z.string().default("Annulée par l'utilisateur") }),
   output: z.object({ followup_id: z.string(), status: z.string() }),
   handler: async (input, ctx) => {
-    const f = cancelFollowupService(input.followup_id, input.reason, { db: ctx.db, settings: ctx.settings, actor: ctx.mode === "chat" ? "user" : "ema" });
+    assertOwned(followupsRepo.getFollowup(input.followup_id, ctx.db), ctx, `Relance ${input.followup_id}`);
+    const f = cancelFollowupService(input.followup_id, input.reason, { db: ctx.db, settings: ctx.settings, userId: ctx.userId, actor: ctx.mode === "chat" ? "user" : "ema" });
     return { followup_id: f.id, status: f.status };
   },
 });
@@ -150,7 +152,8 @@ export const completeFollowup = defineTool({
   input: z.object({ followup_id: z.string() }),
   output: z.object({ followup_id: z.string(), status: z.string() }),
   handler: async (input, ctx) => {
-    const f = completeReminder(input.followup_id, { db: ctx.db, settings: ctx.settings, actor: ctx.mode === "chat" ? "user" : "ema" });
+    assertOwned(followupsRepo.getFollowup(input.followup_id, ctx.db), ctx, `Relance ${input.followup_id}`);
+    const f = completeReminder(input.followup_id, { db: ctx.db, settings: ctx.settings, userId: ctx.userId, actor: ctx.mode === "chat" ? "user" : "ema" });
     return { followup_id: f.id, status: f.status };
   },
 });
@@ -163,8 +166,8 @@ export const prepareFollowupNow = defineTool({
   input: z.object({ followup_id: z.string() }),
   output: z.object({ followup_id: z.string(), outcome: z.string(), action_id: z.string().nullable(), status: z.string(), message: z.string() }),
   handler: async (input, ctx) => {
-    if (!followupsRepo.getFollowup(input.followup_id, ctx.db)) throw new EmaError("NOT_FOUND", `Relance ${input.followup_id} introuvable`);
-    const r = await processFollowup(input.followup_id, { db: ctx.db, settings: ctx.settings, rules: ctx.rules, companies: ctx.companies, contacts: ctx.contacts });
+    assertOwned(followupsRepo.getFollowup(input.followup_id, ctx.db), ctx, `Relance ${input.followup_id}`);
+    const r = await processFollowup(input.followup_id, { db: ctx.db, settings: ctx.settings, rules: ctx.rules, companies: ctx.companies, contacts: ctx.contacts, userId: ctx.userId });
     const after = followupsRepo.getFollowup(input.followup_id, ctx.db);
     return { followup_id: r.followupId, outcome: r.outcome, action_id: r.actionId, status: after?.status ?? "?", message: r.message };
   },
@@ -178,7 +181,7 @@ export const checkReplyReceived = defineTool({
   input: z.object({ thread_id: z.string(), since: z.string() }),
   output: z.object({ replied: z.boolean(), reply_email_id: z.string().nullable() }),
   handler: async (input, ctx) => {
-    const reply = emailsRepo.listThread(input.thread_id, ctx.db).find((e) => e.direction === "inbound" && e.received_at > input.since);
+    const reply = emailsRepo.listThread(input.thread_id, ctx.db, ctx.userId ?? undefined).find((e) => e.direction === "inbound" && e.received_at > input.since);
     return { replied: Boolean(reply), reply_email_id: reply?.id ?? null };
   },
 });

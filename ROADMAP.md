@@ -150,6 +150,15 @@ Aucune nouvelle fonctionnalité métier : fiabilité, idempotence, reprise aprè
 - ✅ `stop()` de l'ordonnanceur annule aussi le premier tick différé
 - ✅ 11 tests supplémentaires (300 au total)
 
+## ASSISTANT MULTI-DIRIGEANTS — comptes, Outlook par utilisateur, WhatsApp EMA central ✅ (18/09/2026)
+
+- ✅ Comptes utilisateurs (email + mot de passe scrypt, numéro E.164 vérifié, unique), inscription et connexion, sessions porteuses du compte
+- ✅ Connexion Microsoft **par utilisateur** (`connections`, permissions déléguées `openid profile offline_access User.Read Mail.Read Mail.Send`), refresh automatique, révocation détectée (`MICROSOFT_RECONNECT`), déconnexion / reconnexion depuis Paramètres → Connexions
+- ✅ UN numéro WhatsApp Business EMA : identification par numéro, activation par premier message « Bonjour EMA », onboarding borné pour les inconnus, désactivation
+- ✅ Isolation `user_id` de bout en bout (emails, documents, actions, relances, conversations, historique, tools, routes, pages, exécuteurs, worker)
+- ✅ 17 tests de scénarios (317 au total) ; aucun secret, aucune donnée réelle
+- ⏳ À valider en réel : App Registration multi-tenant, numéro WhatsApp Business de production (templates hors fenêtre de 24 h), parcours complet d'un nouveau dirigeant sur le VPS
+
 ## V2 — fonctionnalités reportées (hors périmètre V1)
 
 Aucune de ces fonctionnalités n'est nécessaire au premier pilote. Elles sont listées ici pour éviter qu'elles ne s'invitent dans la V1.

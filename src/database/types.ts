@@ -12,6 +12,8 @@ export type EmailDirection = "inbound" | "outbound";
 
 export interface EmailRow {
   id: string;
+  /** Propriétaire de la boîte dont provient l'email (NULL : données antérieures à 010_users). */
+  user_id: string | null;
   graph_id: string;
   thread_id: string | null;
   internet_message_id: string | null;
@@ -87,6 +89,7 @@ export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export interface ActionRow {
   id: string;
+  user_id: string | null;
   type: string;
   source_email_id: string | null;
   company_id: string | null;
@@ -173,6 +176,7 @@ export const TERMINAL_FOLLOWUP_STATUSES: FollowupStatus[] = ["RESPONSE_RECEIVED"
 
 export interface FollowupRow {
   id: string;
+  user_id: string | null;
   kind: FollowupKind;
   thread_id: string;
   email_id: string | null;
@@ -211,6 +215,7 @@ export type DocumentTextStatus = "pending" | "extracted" | "no_text" | "unsuppor
 
 export interface DocumentRow {
   id: string;
+  user_id: string | null;
   email_id: string | null;
   attachment_id: string | null;
   name: string;
@@ -260,6 +265,7 @@ export type HistoryActor = "ema" | "user" | "worker" | "whatsapp" | "system";
 
 export interface HistoryRow {
   id: string;
+  user_id: string | null;
   at: string;
   event_type: string;
   message: string;
@@ -272,12 +278,42 @@ export interface HistoryRow {
   details: string | null;
 }
 
-export interface OAuthTokenRow {
+export type UserRole = "owner" | "user";
+export type UserStatus = "active" | "disabled";
+
+/** Compte EMA : identité web (email + mot de passe) et identité WhatsApp (numéro E.164 vérifié). */
+export interface UserRow {
+  id: string;
+  organization_id: string | null;
+  email: string;
+  name: string | null;
+  password_hash: string | null;
+  role: UserRole;
+  status: UserStatus;
+  phone_number: string | null;
+  phone_verified: number;
+  whatsapp_enabled: number;
+  verified_at: string | null;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ConnectionStatus = "active" | "revoked";
+
+/** Connexion à un fournisseur externe (Microsoft) appartenant à UN utilisateur. Le blob est chiffré. */
+export interface ConnectionRow {
+  id: string;
+  user_id: string | null;
+  organization_id: string | null;
   provider: string;
-  account_email: string | null;
   encrypted: string;
   scopes: string;
   expires_at: string | null;
+  provider_account_email: string | null;
+  status: ConnectionStatus;
+  last_error: string | null;
+  created_at: string;
   updated_at: string;
 }
 
@@ -285,6 +321,7 @@ export type ChatChannel = "WEB" | "WHATSAPP";
 
 export interface ChatMessageRow {
   id: string;
+  user_id: string | null;
   role: "user" | "assistant" | "tool";
   content: string;
   tool_calls: string | null;

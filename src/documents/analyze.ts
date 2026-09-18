@@ -26,6 +26,8 @@ export const MAX_PROMPT_TEXT_CHARS = 30_000;
 export interface DocumentAnalyzeDeps {
   db?: Db;
   settings?: Settings;
+  /** Utilisateur à l'origine de la demande (audit) ; les données restent celles du document. */
+  userId?: string | null;
   companies?: Company[];
   client?: StructuredClient;
   model?: string;

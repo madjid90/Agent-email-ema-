@@ -66,6 +66,9 @@ export interface AssistantDeps {
   model?: string;
   externalId?: string | null;
   sender?: string | null;
+  /** Utilisateur identifié par son numéro (fixé par le routeur, jamais par le modèle). */
+  userId?: string | null;
+  userName?: string | null;
 }
 
 export interface AssistantTurnResult extends ChatTurnResult {
@@ -74,20 +77,20 @@ export interface AssistantTurnResult extends ChatTurnResult {
   refs: ConversationRef[];
 }
 
-function pendingSnapshot(db: Db): Set<string> {
-  return new Set(actionsRepo.listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 100 }, db).map((a) => a.id));
+function pendingSnapshot(db: Db, userId?: string | null): Set<string> {
+  return new Set(actionsRepo.listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 100, userId: userId ?? undefined }, db).map((a) => a.id));
 }
 
 /** Contexte borné injecté dans le prompt : jamais toute la mailbox, jamais tout l'historique. */
-function buildContext(db: Db, settings: Settings): string {
+function buildContext(db: Db, settings: Settings, userId?: string | null): string {
   const blocks: string[] = [];
-  const pending = actionsRepo.listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 5 }, db);
+  const pending = actionsRepo.listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 5, userId: userId ?? undefined }, db);
   if (pending.length > 0) {
     blocks.push(
       `Actions en attente de validation :\n${pending.map((a, i) => `${i + 1}. ${a.id} — ${a.title} (${a.type}, risque ${a.risk_level})`).join("\n")}`,
     );
   }
-  const refs = lastRefs("WHATSAPP", db);
+  const refs = lastRefs("WHATSAPP", db, userId);
   const described = describeRefs(refs);
   if (described) blocks.push(described);
   blocks.push(`Canal : WhatsApp. Fuseau : ${settings.company.timezone}.`);
@@ -98,7 +101,7 @@ function buildContext(db: Db, settings: Settings): string {
 export async function runWhatsappAssistantTurn(text: string, deps: AssistantDeps = {}): Promise<AssistantTurnResult> {
   const db = deps.db ?? getDb();
   const settings = deps.settings ?? getSettings();
-  const before = pendingSnapshot(db);
+  const before = pendingSnapshot(db, deps.userId);
   const collected: Omit<ConversationRef, "index">[] = [];
   let refs: ConversationRef[] = [];
 
@@ -109,12 +112,14 @@ export async function runWhatsappAssistantTurn(text: string, deps: AssistantDeps
   const result = await runChatTurn(text, {
     db,
     settings,
+    userId: deps.userId,
+    userName: deps.userName,
     client: deps.client,
     model: deps.model,
     channel: "WHATSAPP",
     toolNames: WHATSAPP_TOOLS,
     historyLimit: HISTORY_MESSAGES,
-    systemExtra: `${getPrompt("whatsapp")}\n\n${buildContext(db, settings)}`,
+    systemExtra: `${getPrompt("whatsapp")}\n\n${buildContext(db, settings, deps.userId)}`,
     userMeta: { externalId: deps.externalId ?? null, sender: deps.sender ?? null },
     onToolResult,
     assistantMeta: () => {
@@ -124,7 +129,7 @@ export async function runWhatsappAssistantTurn(text: string, deps: AssistantDeps
   });
 
   const newActionIds = actionsRepo
-    .listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 100 }, db)
+    .listActions({ status: ["WAITING_APPROVAL", "PROPOSED"], limit: 100, userId: deps.userId ?? undefined }, db)
     .filter((a) => !before.has(a.id))
     .map((a) => a.id)
     .reverse();

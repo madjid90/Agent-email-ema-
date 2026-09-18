@@ -39,10 +39,11 @@ Renseigner :
 
 - `ANTHROPIC_API_KEY`
 - `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT_ID`, `MICROSOFT_REDIRECT_URI=https://ema.client.fr/api/integrations/microsoft/callback`
-- `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_APPROVER_PHONE`
+- `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_BUSINESS_NUMBER` (numéro EMA affiché aux utilisateurs, E.164)
 - `APP_URL=https://ema.client.fr` — **HTTPS obligatoire** : en production, EMA refuse de démarrer avec une URL en `http://`
 - `APP_SECRET` : `openssl rand -hex 32` (32 caractères minimum)
-- `APP_PASSWORD` : mot de passe d'accès à l'interface (12 caractères minimum, généré : `openssl rand -base64 18`)
+- `ALLOW_SIGNUP` : `true` pour permettre à chaque nouveau dirigeant de créer son compte depuis `/login` (le premier compte est toujours possible et devient propriétaire)
+- `APP_PASSWORD` : **obsolète** (ignoré) — l'accès se fait par compte utilisateur (email + mot de passe, 12 caractères minimum)
 
 Variables optionnelles : `WHATSAPP_ASSISTANT_ENABLED` (défaut `true`), `WHATSAPP_FOLLOWUP_TEMPLATE_NAME` / `_LANG` (notifications proactives hors fenêtre de 24 h), `LOG_LEVEL`, `WORKER_POLL_INTERVAL`, `EMAIL_SYNC_LIMIT`, `EMAIL_INITIAL_SYNC_DAYS`, `ATTACHMENT_MAX_MB`, `DATABASE_PATH`, `PRIVATE_STORAGE_PATH`, `CONFIG_PATH`.
 
@@ -152,6 +153,15 @@ sudo ufw allow OpenSSH
 sudo ufw allow 'Nginx Full'
 sudo ufw enable
 ```
+
+## 7 bis. Comptes, Outlook et WhatsApp par utilisateur
+
+1. Ouvrir `https://ema.client.fr/login` → **Créer un compte** (le premier compte est le propriétaire de l'instance).
+2. **Paramètres → Connexions → Microsoft Outlook → Connecter Outlook** : Microsoft officiel → connexion → consentement → retour EMA → « Connecté ✅ nom@entreprise.fr ». L'URL de redirection Entra doit être exactement `MICROSOFT_REDIRECT_URI` = `https://ema.client.fr/api/integrations/microsoft/callback`.
+3. **Paramètres → Connexions → WhatsApp** : saisir son numéro (`+33 6 …`) → **Continuer** → **Ouvrir WhatsApp** (lien `wa.me` vers `WHATSAPP_BUSINESS_NUMBER` avec « Bonjour EMA » prérempli) → envoyer le message. Le webhook reconnaît le numéro, l'associe définitivement au compte et répond par un message de bienvenue.
+4. Écrire « Quels sont mes emails importants ? » : EMA lit **uniquement** la boîte de ce compte et répond sur WhatsApp.
+
+Chaque dirigeant supplémentaire suit les mêmes étapes (`ALLOW_SIGNUP=true`). Aucun code, aucune variable spécifique au client.
 
 ## 8. Première configuration
 
