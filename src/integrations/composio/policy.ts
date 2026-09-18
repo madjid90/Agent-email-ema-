@@ -116,3 +116,20 @@ export function classifyTools(tools: ComposioTool[]): { allowed: ComposioTool[];
   }
   return { allowed, readOnlyUnused, blocked };
 }
+
+export interface ToolsSummary {
+  executable: number;
+  readOnlyUnused: number;
+  blocked: number;
+  /** Tools exécutables portant un verbe d'écriture : DOIT valoir 0, sinon le POC est en échec. */
+  writeToolsExecutable: number;
+  /** Slugs fautifs, pour l'affichage (vide si 0). */
+  writeToolsExecutableSlugs: string[];
+  pocFailed: boolean;
+}
+
+/** Résumé du diagnostic : `writeToolsExecutable` compte les exécutables contenant un verbe d'écriture (invariant : 0). */
+export function summarizeTools(classified: ReturnType<typeof classifyTools>): ToolsSummary {
+  const offenders = classified.allowed.filter((t) => WRITE_VERBS.test(t.slug.toUpperCase()) || !READ_VERBS.test(t.slug.toUpperCase())).map((t) => t.slug);
+  return { executable: classified.allowed.length, readOnlyUnused: classified.readOnlyUnused.length, blocked: classified.blocked.length, writeToolsExecutable: offenders.length, writeToolsExecutableSlugs: offenders, pocFailed: offenders.length > 0 };
+}

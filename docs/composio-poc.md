@@ -58,9 +58,10 @@ Paramètres → Connexions → « Outlook via Composio (POC) » → /poc/composi
 
   Un tool n'est exécutable que s'il est dans cette table pour l'opération demandée, appartient au toolkit `outlook`, n'est pas déprécié, contient un verbe de lecture et **aucun** verbe d'écriture (`SEND|REPLY|FORWARD|DELETE|MOVE|CREATE|UPDATE|MARK|UPLOAD|BATCH|…`) et ne porte pas sur un autre objet métier (`EVENT|CALENDAR` pour une opération message / pièce jointe, `MESSAGE|MAIL|ATTACHMENT` pour le calendrier). Second contrôle `assertReadOnlySlug(slug, catalogue, opération)` juste avant `execute`. Le client n'envoie jamais un slug, seulement une opération.
 - `src/integrations/composio/outlook-poc.ts` — service : connexion / statut / déconnexion **par utilisateur** (identifiant externe = `user.id`, stable ; toute exécution exige `connected_account_id` + `user_id` ; une référence pointant vers le compte d'un autre utilisateur est rejetée et supprimée), lectures avec adaptation des arguments aux paramètres déclarés par le tool, contenu binaire des pièces jointes jamais renvoyé.
-- Migration `011_composio_poc` (table `composio_connections`), routes `src/app/api/poc/composio/*`, page `src/app/(app)/poc/composio`, composant `composio-poc-panel.tsx`.
+- `src/integrations/composio/preflight.ts` — preflight (état / configuration uniquement, présence des variables sans leur valeur, migration, base, Graph natif intact, tools attendus, capacités) exposé par `GET /api/poc/composio/preflight` (authentifié, POC activé).
+- Migration `011_composio_poc` (table `composio_connections`), routes `src/app/api/poc/composio/*`, page `src/app/(app)/poc/composio` (preflight + smoke test guidé), composant `composio-poc-panel.tsx`.
 
-Le bouton « Tools disponibles (diagnostic) » affiche les tools réellement renvoyés par Composio en trois groupes : exécutables (table), autres tools de lecture (non retenus, non exécutables), refusés (écriture / destructifs). Si une opération ne trouve pas son slug dans le catalogue, l'erreur nomme le slug attendu et liste les tools de lecture présents : mettre à jour `OPERATION_TOOLS` (aucun tool d'écriture ne peut être choisi, quelle que soit la table).
+Le bouton « Tools disponibles (diagnostic WRITE = 0) » affiche les tools réellement renvoyés par Composio en trois groupes : exécutables (table), lecture non retenue (non exécutables), écriture / destructifs refusés, avec le résumé `WRITE tools executable = N` (`summarizeTools`) : N doit valoir 0, sinon le POC est déclaré en échec. Si une opération ne trouve pas son slug dans le catalogue, l'erreur nomme le slug attendu et liste les tools de lecture présents : mettre à jour `OPERATION_TOOLS` (aucun tool d'écriture ne peut être choisi, quelle que soit la table).
 
 ## Retour OAuth : deux modes clairement séparés
 
@@ -87,25 +88,46 @@ Aucune App Registration Entra n'est nécessaire pour le test : Outlook propose �
 5. Le code affiche en alerte tout scope d'écriture que Composio renvoie malgré tout dans `requested_scopes` (`Mail.Send`, `*.ReadWrite`, `*.Write`) et refuse de toute façon toute écriture à l'exécution.
 6. Tenant 3T avec consentement administrateur requis : Microsoft affiche « Need admin approval », Composio passe la connexion en `FAILED` avec le motif ; EMA affiche **« Microsoft administrator approval required. »** et ne contourne rien. Un administrateur du tenant doit approuver l'application Composio pour ces permissions déléguées (Entra → Enterprise applications → Admin consent), puis relancer la connexion.
 
-## Smoke test réel (compte Outlook professionnel 3T)
+## Avant le test réel
 
-Prérequis : `npm run db:migrate` ; `.env` avec `COMPOSIO_POC_ENABLED=true`, `COMPOSIO_API_KEY`, `COMPOSIO_OUTLOOK_AUTH_CONFIG_ID` (auth config Managed OAuth lecture seule ci-dessus) ; mode de retour : `COMPOSIO_CALLBACK_VERIFICATION=true` + verifier URL configuré si un domaine HTTPS public existe (recommandé), sinon `false` en développement uniquement ; EMA démarré ; compte EMA créé et connecté **dans le navigateur qui fera le parcours OAuth**.
+Le preflight de la page `/poc/composio` (route `GET /api/poc/composio/preflight`, utilisateur authentifié, POC activé) vérifie l'état de la configuration **sans jamais afficher une valeur secrète** : chaque variable sensible est réduite à « présente / absente ». Contrôles : `COMPOSIO_POC_ENABLED`, `COMPOSIO_API_KEY` (présente / absente), `COMPOSIO_OUTLOOK_AUTH_CONFIG_ID` (présent / absent), mode de retour OAuth (`local` / `verified`), sécurité production (échec si `NODE_ENV=production` sans vérification d'identité), `APP_URL` (HTTPS en production) et URL du callback, URL de base Composio (HTTPS), base SQLite accessible, migration `011_composio_poc` appliquée (table `composio_connections`), Microsoft Graph natif intact (scopes délégués inchangés), configuration EMA bloquante, nombre de tools Outlook exécutables attendus (8), capacités autorisées (`email.read`, `email.search`, `attachment.read`, `calendar.read`). Jamais affichés : clé API, token, client secret, refresh token, access token.
 
-| # | Test | Action | Attendu |
+Checklist (tout doit être coché avant d'ouvrir le navigateur du dirigeant 3T) :
+
+- [ ] `npm run check` vert (typecheck, lint, tests, build)
+- [ ] migrations appliquées (`npm run db:migrate` ; preflight « Migration 011_composio_poc : OK »)
+- [ ] clé Composio dans `.env` (`COMPOSIO_API_KEY`, jamais ailleurs ; preflight « présente »)
+- [ ] auth config Outlook **lecture seule** créée dans Composio (Managed OAuth, scopes `openid,profile,offline_access,User.Read,Mail.Read,Calendars.Read`)
+- [ ] `COMPOSIO_OUTLOOK_AUTH_CONFIG_ID` configuré (preflight « présent »)
+- [ ] mode de retour choisi : `COMPOSIO_CALLBACK_VERIFICATION=true` + verifier URL `https://<APP_URL>/api/poc/composio/callback` dans Composio (recommandé, obligatoire en production) — ou `false` en développement uniquement, lien gardé privé
+- [ ] compte EMA créé et connecté **dans le navigateur qui fera le parcours OAuth**
+- [ ] aucun scope WRITE (aucun `Mail.Send`, `*.ReadWrite`, `*.Write` dans l'auth config ; la page signale en rouge tout scope d'écriture renvoyé par Composio)
+- [ ] aucun secret dans Git (`git grep -i "composio_api_key=" -- ':!.env.example'` vide ; `.env` ignoré)
+
+## Test réel Outlook 3T
+
+Le tableau « Smoke test guidé » de la page `/poc/composio` suit les 12 étapes ci-dessous et affiche pour chacune **PAS TESTÉ / OK / ÉCHEC**. Il ne vit que dans l'onglet du navigateur (`sessionStorage`, uniquement des états par numéro d'étape : aucun identifiant, aucune adresse, aucun contenu lu) ; « Réinitialiser le tableau » l'efface. Rien n'est stocké en base pour ce tableau.
+
+| # | Étape | Action | Attendu (OK) |
 |---|---|---|---|
-| 0 | Mode de retour | Ouvrir `/poc/composio` | En-tête « Mode de retour OAuth : vérifié » (ou « local (non production-ready) » + avertissement) ; aucun scope d'écriture signalé |
-| 1 | Connexion Outlook 3T | Paramètres → Connexions → « Ouvrir le POC » → **Connecter Outlook via Composio** → connexion Microsoft 3T → consentement (scopes lecture uniquement) → retour EMA (verifier URL ou callback local) | État **Connecté**, adresse du compte affichée (`OUTLOOK_GET_PROFILE`) ; scopes demandés listés sans `Mail.Send` / `Mail.ReadWrite` |
-| 2 | 5 derniers emails | **5 derniers emails** | JSON des 5 messages les plus récents de la boîte 3T, nom du tool utilisé |
-| 3 | Recherche | saisir un mot (ex. objet connu) → **Rechercher** | résultats correspondants |
-| 4 | Métadonnées d'un email | coller un `id` issu de 2 ou 3 → **Détails** | objet, expéditeur, dates, corps |
-| 5 | Pièce jointe | **Pièces jointes** puis coller un id de pièce jointe → **Récupérer** | métadonnées (nom, taille, type) ; le contenu binaire est remplacé par « contenu binaire de N caractères non affiché » |
-| 6 | Calendrier | **Calendrier** | événements des 14 prochains jours |
-| 7 | Aucune écriture | **Tools disponibles (diagnostic)** | « exécutables » = uniquement les 8 slugs de la table ; `OUTLOOK_GET_EVENT_ATTACHMENT` dans « autres tools de lecture (non exécutables) » ; tous les tools SEND / REPLY / FORWARD / DELETE / MOVE / MARK / CREATE / UPDATE / UPLOAD / BATCH dans « refusés » ; aucun bouton d'écriture n'existe ; `curl -X POST /api/poc/composio/read -d '{"operation":"send_email"}'` → 400 |
-| 8 | Déconnexion | **Déconnecter** | état **Déconnecté**, compte supprimé et révoqué chez Composio (`revoke_on_delete=true`) |
-| 9 | Reconnexion | **Connecter Outlook via Composio** à nouveau | nouveau compte connecté (nouvel identifiant `ca_…`), état **Connecté** |
-| 10 | Identité (mode vérifié) | Démarrer une connexion avec le compte EMA A, copier l'URL Microsoft, la terminer dans un navigateur connecté au compte EMA B | B obtient « Callback identity verification failed », la connexion de A passe en **Erreur** ; rien n'est activé |
+| 0 | Preflight | Ouvrir `/poc/composio` (preflight calculé au chargement) ou **Relancer le preflight** | Badge **PRÊT**, aucun contrôle en FAIL ; mode `verified` (ou `local` en avertissement hors production) |
+| 1 | Connecter Outlook | **Connecter Outlook via Composio** (désactivé tant que le preflight n'est pas prêt) → connexion Microsoft 3T → consentement (scopes lecture uniquement) → retour EMA | Au retour, état **Connecté** ; l'étape passe OK automatiquement, ÉCHEC si le retour est refusé |
+| 2 | Vérifier l'identité du compte | Automatique au retour, ou **Vérifier l'identité / la connexion** | Adresse du compte 3T affichée (`OUTLOOK_GET_PROFILE`) ; scopes demandés sans `Mail.Send` / `Mail.ReadWrite` |
+| 3 | Lire les 5 derniers emails | **3. 5 derniers emails** | JSON des 5 messages les plus récents, tool `OUTLOOK_LIST_MESSAGES` |
+| 4 | Rechercher un email | saisir un mot (objet connu) → **Rechercher** | résultats correspondants (`OUTLOOK_SEARCH_MESSAGES` ou `OUTLOOK_QUERY_EMAILS`) |
+| 5 | Lire les détails d'un email | coller un `id` issu de 3 ou 4 → **5. Détails** | objet, expéditeur, dates, corps (`OUTLOOK_GET_MESSAGE`) |
+| 6 | Lister les pièces jointes | **6. Pièces jointes** sur un message qui en a | liste des pièces jointes avec identifiants (`OUTLOOK_LIST_OUTLOOK_ATTACHMENTS`) |
+| 7 | Récupérer une pièce jointe | coller un id de pièce jointe → **Récupérer** | métadonnées (nom, taille, type) ; le contenu binaire est remplacé par « contenu binaire de N caractères non affiché » (`OUTLOOK_DOWNLOAD_OUTLOOK_ATTACHMENT`) |
+| 8 | Lire le calendrier | **8. Calendrier** | événements des 14 prochains jours (`OUTLOOK_LIST_EVENTS`) |
+| 9 | Aucun tool WRITE exécutable | **9. Tools disponibles (diagnostic WRITE = 0)** | Résumé **WRITE tools executable = 0** ; « exécutables » = uniquement les 8 slugs de la table ; `OUTLOOK_GET_EVENT_ATTACHMENT` dans « lecture non retenue » ; SEND / REPLY / FORWARD / DELETE / MOVE / MARK / CREATE / UPDATE / UPLOAD / BATCH dans « écriture / destructifs refusés ». **Si le compteur n'est pas 0, le POC est en échec** (bandeau rouge) : arrêter le test. Complément : `curl -X POST /api/poc/composio/read -d '{"operation":"send_email"}'` → 400 |
+| 10 | Déconnexion | **Déconnecter** | état **Déconnecté**, compte supprimé et révoqué chez Composio (`revoke_on_delete=true`) |
+| 11 | Reconnexion | **Reconnecter Outlook via Composio** → même parcours qu'en 1 | nouveau compte connecté (nouvel identifiant `ca_…`), état **Connecté** ; l'étape 11 passe OK au retour |
 
-Contrôles transverses : `grep -r "<clé>" logs/` ne renvoie rien ; `sqlite3 data/ema.db "select * from composio_connections"` ne contient aucun token ; un second compte EMA (autre navigateur) voit **Déconnecté** et ne peut rien lire (isolation).
+Contrôle complémentaire (mode vérifié) : démarrer une connexion avec le compte EMA A, copier l'URL Microsoft, la terminer dans un navigateur connecté au compte EMA B → B obtient un refus, la connexion de A passe en **Erreur**, rien n'est activé.
+
+Contrôles transverses après le test : `grep -r "<clé>" logs/` ne renvoie rien ; `sqlite3 data/ema.db "select * from composio_connections"` ne contient aucun token ; un second compte EMA (autre navigateur) voit **Déconnecté** et ne peut rien lire (isolation) ; la boîte 3T ne contient aucun brouillon, envoi, déplacement ni marquage créé pendant le test.
+
+Résultat attendu pour valider le POC : étapes 0 à 11 **OK**, `WRITE tools executable = 0`, aucun scope d'écriture signalé, aucune fuite de secret.
 
 ## Limites du POC
 

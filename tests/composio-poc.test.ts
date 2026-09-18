@@ -13,7 +13,14 @@ import { fakeFetch, json, type RecordedCall } from "./helpers/fake-graph";
 const sessionUserRef: { current: import("@/database/types").UserRow | null } = { current: null };
 vi.mock("@/security/auth", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/security/auth")>();
-  return { ...original, getSessionUser: async () => sessionUserRef.current };
+  return {
+    ...original,
+    getSessionUser: async () => sessionUserRef.current,
+    requireSessionUser: async () => {
+      if (!sessionUserRef.current) throw new (await import("@/lib/errors")).EmaError("UNAUTHORIZED", "Authentification requise");
+      return sessionUserRef.current;
+    },
+  };
 });
 
 /** Clé factice, jamais réelle : sert uniquement à prouver qu'elle ne fuit nulle part. */
@@ -800,5 +807,225 @@ describe("POC Composio — retour OAuth : mode local (développement) et Callbac
     expect(managedOAuthScopes()).not.toMatch(/\s/);
     for (const forbidden of ["Mail.Send", "Mail.ReadWrite", "Calendars.ReadWrite", "Files.ReadWrite", ".Write"]) expect(managedOAuthScopes()).not.toContain(forbidden);
     expect([...POC_READ_ONLY_SCOPES]).toEqual(["openid", "profile", "offline_access", "User.Read", "Mail.Read", "Calendars.Read"]);
+  });
+});
+
+describe("POC Composio — preflight, smoke test guidé, invariant WRITE = 0", () => {
+  let db: Db;
+  const saved: Record<string, string | undefined> = {};
+  const VARS = ["NODE_ENV", "APP_URL", "APP_SECRET", "COMPOSIO_POC_ENABLED", "COMPOSIO_API_KEY", "COMPOSIO_OUTLOOK_AUTH_CONFIG_ID", "COMPOSIO_BASE_URL", "COMPOSIO_CALLBACK_VERIFICATION", "MICROSOFT_CLIENT_SECRET", "WHATSAPP_ACCESS_TOKEN", "ANTHROPIC_API_KEY"];
+  /** Faux secrets : servent uniquement à prouver qu'aucune valeur ne sort du preflight. */
+  const FAKE_AUTH_CONFIG_ID = "ac_fake_outlook_readonly_0000";
+  const FAKE_CLIENT_SECRET = "microsoft-client-secret-NEVER-SHOWN";
+  const FAKE_WA_TOKEN = "whatsapp-token-NEVER-SHOWN";
+  const FAKE_APP_SECRET = "app-secret-32-characters-long-NEVER-SHOWN";
+
+  beforeEach(() => {
+    db = openIsolatedDb();
+    resetComposioPocForTests();
+    for (const k of VARS) saved[k] = process.env[k];
+    sessionUserRef.current = null;
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) setEnv(k, v);
+    resetEnvCache();
+    sessionUserRef.current = null;
+  });
+
+  function configureFake(overrides: Record<string, string | undefined> = {}) {
+    setEnv("NODE_ENV", "development");
+    setEnv("APP_URL", "https://ema.test");
+    setEnv("APP_SECRET", FAKE_APP_SECRET);
+    setEnv("COMPOSIO_POC_ENABLED", "true");
+    setEnv("COMPOSIO_API_KEY", FAKE_KEY);
+    setEnv("COMPOSIO_OUTLOOK_AUTH_CONFIG_ID", FAKE_AUTH_CONFIG_ID);
+    setEnv("COMPOSIO_BASE_URL", undefined);
+    setEnv("COMPOSIO_CALLBACK_VERIFICATION", "true");
+    setEnv("MICROSOFT_CLIENT_SECRET", FAKE_CLIENT_SECRET);
+    setEnv("WHATSAPP_ACCESS_TOKEN", FAKE_WA_TOKEN);
+    setEnv("ANTHROPIC_API_KEY", undefined);
+    for (const [k, v] of Object.entries(overrides)) setEnv(k, v);
+    resetEnvCache();
+  }
+
+  it("preflight sans clé : COMPOSIO_API_KEY absente → FAIL, non prêt, aucune valeur exposée", async () => {
+    configureFake({ COMPOSIO_API_KEY: undefined });
+    const { runComposioPreflight } = await import("@/integrations/composio/preflight");
+    const report = runComposioPreflight({ db });
+    expect(report.ready).toBe(false);
+    const byKey = Object.fromEntries(report.checks.map((c) => [c.key, c]));
+    expect(byKey.api_key).toMatchObject({ level: "FAIL", detail: expect.stringMatching(/absente/) });
+    expect(byKey.poc_enabled?.level).toBe("OK");
+    expect(byKey.db?.level).toBe("OK");
+    expect(byKey.migration?.level).toBe("OK");
+  });
+
+  it("preflight correctement configuré (fausses variables) : tout OK, mode vérifié, 8 tools attendus, 4 capacités de lecture", async () => {
+    configureFake();
+    const { runComposioPreflight, expectedExecutableToolCount, nativeGraphIntact, POC_CAPABILITIES } = await import("@/integrations/composio/preflight");
+    const report = runComposioPreflight({ db });
+    expect(report.ready).toBe(true);
+    expect(report.callbackMode).toBe("verified");
+    expect(report.baseUrl).toBe(DEFAULT_COMPOSIO_BASE_URL);
+    expect(report.expectedExecutableTools).toBe(8);
+    expect(expectedExecutableToolCount()).toBe([...new Set(Object.values(OPERATION_TOOLS).flat())].length);
+    expect([...report.capabilities]).toEqual(["email.read", "email.search", "attachment.read", "calendar.read"]);
+    expect([...POC_CAPABILITIES]).toEqual([...report.capabilities]);
+    expect([...report.readOnlyScopes]).toEqual([...POC_READ_ONLY_SCOPES]);
+    const byKey = Object.fromEntries(report.checks.map((c) => [c.key, c]));
+    for (const key of ["poc_enabled", "api_key", "auth_config_id", "callback_mode", "production_safety", "app_url", "base_url", "db", "migration", "native_graph", "env_blocking", "executable_tools", "capabilities"]) {
+      expect(byKey[key]?.level, key).toBe("OK");
+    }
+    expect(byKey.api_key?.detail).toBe("présente");
+    expect(byKey.auth_config_id?.detail).toBe("présent");
+    expect(byKey.app_url?.detail).toContain("https://ema.test/api/poc/composio/callback");
+    expect(byKey.migration?.detail).toMatch(/composio_connections/);
+    expect(nativeGraphIntact().intact).toBe(true);
+    expect(byKey.native_graph?.detail).toContain("Mail.Send"); // Graph natif conserve ses scopes : le POC n'y touche pas
+    // Auth config absente : avertissement seulement (découverte automatique) ; base sans HTTPS : échec.
+    configureFake({ COMPOSIO_OUTLOOK_AUTH_CONFIG_ID: undefined, COMPOSIO_BASE_URL: "http://composio.local" });
+    const r2 = runComposioPreflight({ db });
+    const k2 = Object.fromEntries(r2.checks.map((c) => [c.key, c]));
+    expect(k2.auth_config_id?.level).toBe("WARN");
+    expect(k2.base_url?.level).toBe("FAIL");
+    expect(r2.ready).toBe(false);
+  });
+
+  it("preflight : aucune valeur de secret dans la réponse (clé, auth config, secret client, token WhatsApp, APP_SECRET), route authentifiée", async () => {
+    configureFake();
+    const { runComposioPreflight } = await import("@/integrations/composio/preflight");
+    const serialized = JSON.stringify(runComposioPreflight({ db }));
+    for (const secret of [FAKE_KEY, FAKE_AUTH_CONFIG_ID, FAKE_CLIENT_SECRET, FAKE_WA_TOKEN, FAKE_APP_SECRET, FAKE_TOKEN]) expect(serialized).not.toContain(secret);
+    expect(serialized).not.toMatch(/access_token|refresh_token|client_secret/i);
+
+    const { GET } = await import("@/app/api/poc/composio/preflight/route");
+    // Sans session : 401, aucun contenu de preflight.
+    const anon = await GET(new Request("https://ema.test/api/poc/composio/preflight"), {});
+    expect(anon.status).toBe(401);
+    expect(await anon.text()).not.toContain("checks");
+    // Avec session : réponse complète, toujours sans secret.
+    const { getDb } = await import("@/database/connection");
+    const u = users.getUserByEmail("preflight@3t.fr", getDb()) ?? users.createUser({ email: "preflight@3t.fr" }, getDb());
+    sessionUserRef.current = u;
+    const res = await GET(new Request("https://ema.test/api/poc/composio/preflight"), {});
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('"ready":true');
+    for (const secret of [FAKE_KEY, FAKE_AUTH_CONFIG_ID, FAKE_CLIENT_SECRET, FAKE_WA_TOKEN, FAKE_APP_SECRET]) expect(text).not.toContain(secret);
+  });
+
+  it("WRITE tools executable = 0 : résumé du diagnostic, route tools, invariant même avec un catalogue hostile", async () => {
+    configureFake();
+    const { summarizeTools, classifyTools, WRITE_VERBS } = await import("@/integrations/composio/policy");
+    const fake = fakeComposio();
+    const { allowed, readOnlyUnused, blocked } = await listPocTools({ db, client: client(fake.fetchImpl) });
+    const summary = summarizeTools({ allowed, readOnlyUnused, blocked });
+    expect(summary).toMatchObject({ executable: 8, writeToolsExecutable: 0, writeToolsExecutableSlugs: [], pocFailed: false });
+    expect(summary.blocked).toBeGreaterThan(0);
+    expect(allowed.some((t) => WRITE_VERBS.test(t.slug))).toBe(false);
+
+    // Catalogue hostile : tools d'écriture déguisés (verbe de lecture + verbe d'écriture, slug autorisé mais déprécié, autre toolkit).
+    const hostile = [
+      ...CURRENT_OUTLOOK_CATALOGUE,
+      { slug: "OUTLOOK_GET_AND_DELETE_MESSAGE" },
+      { slug: "OUTLOOK_LIST_MESSAGES_AND_SEND" },
+      { slug: "OUTLOOK_READ_THEN_FORWARD" },
+    ];
+    resetComposioPocForTests();
+    const fake2 = fakeComposio({ tools: hostile });
+    const classified = classifyTools(await client(fake2.fetchImpl).listTools("outlook"));
+    const s2 = summarizeTools(classified);
+    expect(s2.writeToolsExecutable).toBe(0);
+    expect(s2.pocFailed).toBe(false);
+    expect(classified.blocked.map((t) => t.slug)).toEqual(expect.arrayContaining(["OUTLOOK_GET_AND_DELETE_MESSAGE", "OUTLOOK_LIST_MESSAGES_AND_SEND", "OUTLOOK_READ_THEN_FORWARD"]));
+    // Un exécutable d'écriture (impossible par construction) serait détecté comme échec du POC.
+    const forged = { ...classified, allowed: [...classified.allowed, { ...classified.allowed[0]!, slug: "OUTLOOK_SEND_EMAIL" }] };
+    expect(summarizeTools(forged)).toMatchObject({ writeToolsExecutable: 1, writeToolsExecutableSlugs: ["OUTLOOK_SEND_EMAIL"], pocFailed: true });
+
+    // Route diagnostic : trois catégories + résumé.
+    const { GET } = await import("@/app/api/poc/composio/tools/route");
+    const { setComposioClientForTests } = await import("@/integrations/composio/outlook-poc");
+    resetComposioPocForTests();
+    setComposioClientForTests(client(fake.fetchImpl));
+    const { getDb } = await import("@/database/connection");
+    sessionUserRef.current = users.getUserByEmail("tools@3t.fr", getDb()) ?? users.createUser({ email: "tools@3t.fr" }, getDb());
+    try {
+      const res = await GET(new Request("https://ema.test/api/poc/composio/tools"), {});
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { allowed: unknown[]; readOnlyUnused: unknown[]; blocked: unknown[]; summary: { writeToolsExecutable: number; pocFailed: boolean } } };
+      expect(body.data.summary).toMatchObject({ writeToolsExecutable: 0, pocFailed: false });
+      expect(body.data.allowed).toHaveLength(8);
+      expect(body.data.readOnlyUnused.length).toBeGreaterThan(0);
+      expect(body.data.blocked.length).toBeGreaterThan(0);
+      expect(JSON.stringify(body)).not.toContain(FAKE_KEY);
+    } finally {
+      setComposioClientForTests(null);
+    }
+  });
+
+  it("page smoke test inaccessible sans session : page → UNAUTHORIZED, routes preflight/tools/status → 401", async () => {
+    configureFake();
+    sessionUserRef.current = null;
+    const page = (await import("@/app/(app)/poc/composio/page")).default;
+    await expect(page({ searchParams: Promise.resolve({}) })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    for (const path of ["preflight", "tools", "status"]) {
+      const { GET } = await import(`@/app/api/poc/composio/${path}/route`);
+      const res = await GET(new Request(`https://ema.test/api/poc/composio/${path}`), {});
+      expect(res.status, path).toBe(401);
+    }
+  });
+
+  it("POC désactivé : page introuvable (notFound), routes preflight/tools → 404, preflight le signale", async () => {
+    configureFake({ COMPOSIO_POC_ENABLED: "false" });
+    const { runComposioPreflight } = await import("@/integrations/composio/preflight");
+    const report = runComposioPreflight({ db });
+    expect(report.ready).toBe(false);
+    expect(report.checks.find((c) => c.key === "poc_enabled")).toMatchObject({ level: "FAIL" });
+    const { getDb } = await import("@/database/connection");
+    sessionUserRef.current = users.getUserByEmail("off@3t.fr", getDb()) ?? users.createUser({ email: "off@3t.fr" }, getDb());
+    const page = (await import("@/app/(app)/poc/composio/page")).default;
+    await expect(page({ searchParams: Promise.resolve({}) })).rejects.toThrow(/NEXT_HTTP_ERROR_FALLBACK;404|NEXT_NOT_FOUND/);
+    for (const path of ["preflight", "tools"]) {
+      const { GET } = await import(`@/app/api/poc/composio/${path}/route`);
+      const res = await GET(new Request(`https://ema.test/api/poc/composio/${path}`), {});
+      expect(res.status, path).toBe(404);
+    }
+  });
+
+  it("callback verified incohérent → fail closed : production sans vérification refuse tout, session_uri jamais consommé", async () => {
+    // Production + COMPOSIO_CALLBACK_VERIFICATION=false : preflight FAIL, route callback refuse sans appel Composio.
+    configureFake({ NODE_ENV: "production", COMPOSIO_CALLBACK_VERIFICATION: "false" });
+    const { runComposioPreflight } = await import("@/integrations/composio/preflight");
+    const report = runComposioPreflight({ db });
+    expect(report.ready).toBe(false);
+    expect(report.callbackMode).toBeNull();
+    expect(report.checks.find((c) => c.key === "production_safety")).toMatchObject({ level: "FAIL", detail: expect.stringMatching(/obligatoire en production/) });
+
+    const { GET } = await import("@/app/api/poc/composio/callback/route");
+    const { setComposioClientForTests } = await import("@/integrations/composio/outlook-poc");
+    const fake = fakeComposio({ accounts: [{ id: "ca_prod", status: "INITIATED", user_id: "someone" }] });
+    fake.sessions.set("https://backend.composio.dev/session/prod", { accountId: "ca_prod", ownerUserId: "someone" });
+    setComposioClientForTests(client(fake.fetchImpl));
+    const { getDb } = await import("@/database/connection");
+    sessionUserRef.current = users.getUserByEmail("prod@3t.fr", getDb()) ?? users.createUser({ email: "prod@3t.fr" }, getDb());
+    try {
+      const res = await GET(new Request("https://ema.test/api/poc/composio/callback?session_uri=https%3A%2F%2Fbackend.composio.dev%2Fsession%2Fprod"), {});
+      expect(res.status).toBe(302);
+      const error = new URL(res.headers.get("location") ?? "https://x/").searchParams.get("error") ?? "";
+      expect(error).toMatch(/obligatoire en production/);
+      expect(fake.calls).toHaveLength(0);
+      expect(fake.sessions.has("https://backend.composio.dev/session/prod")).toBe(true);
+      expect(fake.accounts.get("ca_prod")?.status).toBe("INITIATED");
+      expect(error).not.toContain(FAKE_KEY);
+
+      // Mode vérifié, session_uri présent mais aucun parcours démarré depuis EMA : refus avant complete_auth.
+      configureFake({ NODE_ENV: "production", COMPOSIO_CALLBACK_VERIFICATION: "true" });
+      const res2 = await GET(new Request("https://ema.test/api/poc/composio/callback?session_uri=https%3A%2F%2Fbackend.composio.dev%2Fsession%2Fprod"), {});
+      expect(new URL(res2.headers.get("location") ?? "https://x/").searchParams.get("error")).toMatch(/aucune connexion|Aucune connexion/);
+      expect(fake.calls.filter((c) => c.url.endsWith("/connected_accounts/complete_auth"))).toHaveLength(0);
+      expect(fake.sessions.has("https://backend.composio.dev/session/prod")).toBe(true);
+    } finally {
+      setComposioClientForTests(null);
+    }
   });
 });
