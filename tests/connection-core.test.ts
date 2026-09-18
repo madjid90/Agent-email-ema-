@@ -7,6 +7,7 @@ import {
   canAgentUse,
   requiresHumanApproval,
   resolveConnectionBackend,
+  createComposioSession,
 } from "@/connections";
 
 describe("Agency Connection Core", () => {
@@ -75,6 +76,56 @@ describe("Agency Connection Core", () => {
 
     expect(resolveConnectionBackend(nativeEnv)).toBe("native");
     expect(resolveConnectionBackend({ ...nativeEnv, COMPOSIO_ENABLED: true, COMPOSIO_API_KEY: "cmp_test" })).toBe("composio");
+  });
+
+  it("crée une session Composio avec une politique restreinte et sans workbench", async () => {
+    let capturedBody: unknown = null;
+    let capturedHeaders: HeadersInit | undefined;
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      capturedBody = JSON.parse(String(init?.body));
+      capturedHeaders = init?.headers;
+      return new Response(JSON.stringify({ session_id: "trs_test", mcp: { type: "http", url: "https://example.test/mcp" } }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const result = await createComposioSession({
+      apiKey: "cmp_secret",
+      externalUserId: "ema_abc",
+      policy: buildComposioSessionPolicy("knowledge"),
+      fetchImpl,
+    });
+
+    expect(result.session_id).toBe("trs_test");
+    expect(capturedBody).toEqual({
+      user_id: "ema_abc",
+      toolkits: { enabled: ["outlook", "one_drive", "share_point", "googledrive", "hubspot"] },
+      tags: { enabled: ["readOnlyHint"], disabled: ["destructiveHint"] },
+      workbench: { enable: false },
+    });
+    expect(capturedHeaders).toMatchObject({ "x-api-key": "cmp_secret" });
+  });
+
+  it("assainit les erreurs Composio et ne renvoie jamais la clé API", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({ error: { message: "secret detail", slug: "INVALID_API_KEY", request_id: "req_1" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+
+    await expect(
+      createComposioSession({
+        apiKey: "cmp_super_secret",
+        externalUserId: "ema_abc",
+        policy: buildComposioSessionPolicy("ema"),
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      code: "INTEGRATION",
+      message: "Composio a refusé la création de session",
+      details: { status: 401, code: "INVALID_API_KEY", requestId: "req_1" },
+    });
   });
 
   it("crée une session provider-neutral pour un utilisateur donné", async () => {
