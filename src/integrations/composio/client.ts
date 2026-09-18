@@ -8,8 +8,8 @@ import { createLogger } from "@/lib/logger";
  * Pourquoi REST et non le SDK `@composio/core` : le SDK 0.18 exige Node
  * ≥ 22.22.3 (EMA : `engines >= 20.11`, VPS en 22.22.2) et tire `openai`,
  * `pusher-js` et `undici`. Le contrat ci-dessous est celui du client généré
- * `@composio/client` (Stainless) publié sur npm : en-tête `x-api-key`,
- * préfixe `/api/v3.1`.
+ * `@composio/client` (Stainless) publié sur npm et de la documentation v3.1 :
+ * base `https://backend.composio.dev`, en-tête `x-api-key`, préfixe `/api/v3.1`.
  *
  * Règles : la clé ne quitte jamais ce module ; aucune réponse brute n'est
  * journalisée ; les comptes connectés sont ASSAINIS (Composio renvoie
@@ -17,6 +17,8 @@ import { createLogger } from "@/lib/logger";
  */
 const log = createLogger("composio.client");
 const TIMEOUT_MS = 20_000;
+/** URL officielle documentée de l'API Composio (surchargeable par COMPOSIO_BASE_URL). */
+export const DEFAULT_COMPOSIO_BASE_URL = "https://backend.composio.dev";
 
 export type ComposioStatus = "INITIALIZING" | "INITIATED" | "ACTIVE" | "FAILED" | "EXPIRED" | "INACTIVE" | "REVOKED";
 
@@ -43,9 +45,33 @@ export interface ComposioTool {
   scopes: string[];
   tags: string[];
   deprecated: boolean;
-  /** Noms des paramètres d'entrée déclarés (schéma JSON), pour adapter les arguments à l'exécution. */
+  /** Noms des paramètres d'entrée déclarés par Composio, pour adapter les arguments à l'exécution. */
   inputParameters: string[];
   requiredParameters: string[];
+}
+
+/**
+ * `input_parameters` tel que documenté en v3.1 : mapping direct
+ * `{ nom: { type, description, required, example } }`. La forme JSON Schema
+ * (`{ properties: {…}, required: […] }`) est acceptée aussi, par robustesse.
+ */
+export function parseInputParameters(raw: unknown): { names: string[]; required: string[] } {
+  if (!raw || typeof raw !== "object") return { names: [], required: [] };
+  const obj = raw as Record<string, unknown>;
+  const props = obj.properties;
+  const looksLikeJsonSchema = props !== undefined && typeof props === "object" && props !== null && !Array.isArray(props) && (obj.type === "object" || Array.isArray(obj.required) || Object.keys(obj).every((k) => ["type", "properties", "required", "additionalProperties", "title", "description", "$schema"].includes(k)));
+  if (looksLikeJsonSchema) {
+    const names = Object.keys(props as Record<string, unknown>);
+    return { names, required: strArray(obj.required).filter((r) => names.includes(r)) };
+  }
+  const names: string[] = [];
+  const required: string[] = [];
+  for (const [name, def] of Object.entries(obj)) {
+    if (!def || typeof def !== "object") continue;
+    names.push(name);
+    if ((def as Record<string, unknown>).required === true) required.push(name);
+  }
+  return { names, required };
 }
 
 export interface ComposioExecuteResult {
@@ -108,8 +134,8 @@ function sanitizeTool(raw: unknown): ComposioTool {
     scopes: strArray(r.scopes),
     tags: strArray(r.tags),
     deprecated: r.is_deprecated === true,
-    inputParameters: Object.keys(((r.input_parameters as Record<string, unknown> | undefined)?.properties as Record<string, unknown> | undefined) ?? {}),
-    requiredParameters: strArray((r.input_parameters as Record<string, unknown> | undefined)?.required),
+    inputParameters: parseInputParameters(r.input_parameters).names,
+    requiredParameters: parseInputParameters(r.input_parameters).required,
   };
 }
 
@@ -121,7 +147,7 @@ export class ComposioClient {
   constructor(opts: ComposioClientOptions) {
     if (!opts.apiKey) throw new EmaError("CONFIG", "COMPOSIO_API_KEY absente");
     this.apiKey = opts.apiKey;
-    this.baseUrl = (opts.baseUrl ?? "https://api.composio.dev").replace(/\/+$/, "");
+    this.baseUrl = (opts.baseUrl ?? DEFAULT_COMPOSIO_BASE_URL).replace(/\/+$/, "");
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
@@ -200,6 +226,27 @@ export class ComposioClient {
   async listAccounts(input: { userId: string; toolkitSlug?: string }): Promise<ComposioConnectedAccount[]> {
     const json = await this.request<{ items?: unknown[] }>("GET", "/connected_accounts", { query: { user_ids: [input.userId], toolkit_slugs: input.toolkitSlug ? [input.toolkitSlug] : undefined, limit: "20" } });
     return (json.items ?? []).map(sanitizeAccount);
+  }
+
+  /**
+   * Callback Identity Verification : échange le `session_uri` (usage unique,
+   * 10 minutes) reçu sur le verifier URL contre l'activation du compte, à
+   * condition que `user_id` soit bien le propriétaire de la connexion.
+   * 400 → identité différente (Composio passe la connexion en FAILED) ;
+   * 404 → session inconnue, expirée ou déjà consommée.
+   */
+  async completeAuth(input: { sessionUri: string; userId: string }): Promise<{ connectedAccountId: string; toolkitSlug: string | null; status: ComposioStatus | null }> {
+    let json: Record<string, unknown>;
+    try {
+      json = await this.request<Record<string, unknown>>("POST", "/connected_accounts/complete_auth", { body: { session_uri: input.sessionUri, user_id: input.userId } });
+    } catch (err) {
+      if (err instanceof ComposioError && err.httpStatus === 400) throw new EmaError("FORBIDDEN", "Callback identity verification failed : l'utilisateur revenu du parcours OAuth n'est pas celui qui l'a démarré. Connexion refusée.", { cause: err });
+      if (err instanceof ComposioError && err.httpStatus === 404) throw new EmaError("CONFLICT", "Session de vérification inconnue, expirée (10 minutes) ou déjà utilisée : relancer la connexion.", { cause: err });
+      throw err;
+    }
+    const connectedAccountId = str(json.connected_account_id);
+    if (!connectedAccountId) throw new ComposioError("Réponse Composio inattendue (complete_auth sans connected_account_id)", null);
+    return { connectedAccountId, toolkitSlug: str(json.toolkit_slug), status: str(json.status) as ComposioStatus | null };
   }
 
   /** Suppression + révocation des identifiants côté fournisseur. */

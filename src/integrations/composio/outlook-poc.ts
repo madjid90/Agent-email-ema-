@@ -10,6 +10,15 @@ import { ComposioError, createComposioClient, type ComposioClient, type Composio
 import { assertReadOnlySlug, classifyTools, POC_TOOLKIT, resolveOperation, type ReadOperation } from "./policy";
 
 /**
+ * Mode de retour OAuth.
+ * - `verified` : Callback Identity Verification (verifier URL du projet Composio
+ *   + `complete_auth` avec l'utilisateur de session) — seul mode admis en production.
+ * - `local` : callback_url classique, toléré uniquement hors production pour un
+ *   test sans domaine HTTPS public ; le lien OAuth doit rester privé.
+ */
+export type CallbackMode = "verified" | "local";
+
+/**
  * POC « Outlook via Composio » — lecture seule, isolé du reste d'EMA.
  *
  * - Actif uniquement si COMPOSIO_POC_ENABLED=true ; sinon EMA ignore ce module.
@@ -37,6 +46,9 @@ export interface PocState {
   enabled: boolean;
   configured: boolean;
   configError: string | null;
+  callbackMode: CallbackMode;
+  /** Mode local hors production : à afficher comme non production-ready. */
+  callbackWarning: string | null;
   status: PocUiStatus;
   accountEmail: string | null;
   connectedAccountId: string | null;
@@ -61,6 +73,18 @@ export function resetComposioPocForTests(): void {
 export function isComposioPocEnabled(): boolean {
   return getEnv().COMPOSIO_POC_ENABLED;
 }
+
+/** Mode de callback effectif ; lève CONFIG (fail-closed) en production sans vérification d'identité. */
+export function resolveCallbackMode(): CallbackMode {
+  const env = getEnv();
+  if (env.COMPOSIO_CALLBACK_VERIFICATION) return "verified";
+  if (env.NODE_ENV === "production") {
+    throw new EmaError("CONFIG", "Callback Identity Verification obligatoire en production : COMPOSIO_CALLBACK_VERIFICATION=true et verifier URL configuré dans Composio (Settings → General). Connexion refusée.");
+  }
+  return "local";
+}
+
+export const LOCAL_CALLBACK_WARNING = "Mode POC local : retour OAuth par callback classique, sans vérification d'identité (session fixation possible). Le lien de connexion doit rester privé. Ce mode n'est jamais production-ready.";
 
 function resolve(deps: PocDeps): { db: Db; client: ComposioClient; now: Date } {
   if (!isComposioPocEnabled()) throw new EmaError("CONFIG", "POC Composio désactivé (COMPOSIO_POC_ENABLED=false)");
@@ -91,10 +115,19 @@ export function getPocState(user: UserRow, db: Db = getDb()): PocState {
   const configured = enabled && Boolean(env.COMPOSIO_API_KEY);
   const row = enabled ? getComposioConnection(user.id, db) : undefined;
   const scopes = row ? (JSON.parse(row.requested_scopes) as string[]) : [];
+  let callbackMode: CallbackMode = "local";
+  let callbackError: string | null = null;
+  try {
+    callbackMode = resolveCallbackMode();
+  } catch (err) {
+    callbackError = err instanceof Error ? err.message : String(err);
+  }
   return {
     enabled,
-    configured,
-    configError: !enabled ? "COMPOSIO_POC_ENABLED=false" : !env.COMPOSIO_API_KEY ? "COMPOSIO_API_KEY absente dans .env" : null,
+    configured: configured && !callbackError,
+    configError: !enabled ? "COMPOSIO_POC_ENABLED=false" : !env.COMPOSIO_API_KEY ? "COMPOSIO_API_KEY absente dans .env" : callbackError,
+    callbackMode,
+    callbackWarning: enabled && !callbackError && callbackMode === "local" ? LOCAL_CALLBACK_WARNING : null,
     status: uiStatus(row),
     accountEmail: row?.account_email ?? null,
     connectedAccountId: row?.connected_account_id ?? null,
@@ -117,9 +150,16 @@ async function resolveAuthConfigId(client: ComposioClient): Promise<string> {
   throw new EmaError("CONFIG", `Plusieurs auth configs Outlook (${configs.map((c) => c.id).join(", ")}) : renseignez COMPOSIO_OUTLOOK_AUTH_CONFIG_ID`);
 }
 
-/** Démarre le parcours OAuth Composio/Microsoft pour l'utilisateur connecté. */
-export async function startComposioConnection(user: UserRow, callbackUrl: string, deps: PocDeps = {}): Promise<{ redirectUrl: string; connectedAccountId: string }> {
+/**
+ * Démarre le parcours OAuth Composio/Microsoft pour l'utilisateur connecté.
+ * Mode `verified` : aucun callback_url n'est transmis, Composio ramène le
+ * navigateur sur le verifier URL du projet avec un `session_uri` que seul
+ * `completeComposioCallback` peut consommer. Mode `local` (hors production
+ * uniquement) : callback_url classique.
+ */
+export async function startComposioConnection(user: UserRow, callbackUrl: string, deps: PocDeps = {}): Promise<{ redirectUrl: string; connectedAccountId: string; callbackMode: CallbackMode }> {
   const { db, client } = resolve(deps);
+  const callbackMode = resolveCallbackMode();
   const existing = getComposioConnection(user.id, db);
   // Reconnexion : l'ancien compte est supprimé côté Composio avant d'en créer un nouveau.
   if (existing) {
@@ -131,11 +171,44 @@ export async function startComposioConnection(user: UserRow, callbackUrl: string
     deleteComposioConnection(user.id, db);
   }
   const authConfigId = await resolveAuthConfigId(client);
-  const link = await client.createLink({ authConfigId, userId: user.id, callbackUrl });
+  const link = await client.createLink({ authConfigId, userId: user.id, ...(callbackMode === "local" ? { callbackUrl } : {}) });
   upsertComposioConnection({ userId: user.id, connectedAccountId: link.connectedAccountId, authConfigId, status: "INITIATED" }, db);
-  logHistory({ eventType: "composio.connect_started", message: "Connexion Outlook via Composio démarrée (POC)", actor: "user", userId: user.id }, db);
-  log.info("composio link created", { userId: user.id, connectedAccountId: link.connectedAccountId });
-  return { redirectUrl: link.redirectUrl, connectedAccountId: link.connectedAccountId };
+  logHistory({ eventType: "composio.connect_started", message: `Connexion Outlook via Composio démarrée (POC, mode ${callbackMode})`, actor: "user", userId: user.id }, db);
+  log.info("composio link created", { userId: user.id, connectedAccountId: link.connectedAccountId, callbackMode });
+  return { redirectUrl: link.redirectUrl, connectedAccountId: link.connectedAccountId, callbackMode };
+}
+
+/**
+ * Callback Identity Verification : consomme le `session_uri` reçu sur le
+ * verifier URL avec l'identifiant de l'utilisateur AUTHENTIFIÉ (session EMA).
+ * Composio n'active la connexion que si cet utilisateur est bien celui qui a
+ * démarré le parcours. Le compte activé doit en plus correspondre à la
+ * référence mémorisée pour cet utilisateur.
+ */
+export async function completeComposioCallback(user: UserRow, sessionUri: string, deps: PocDeps = {}): Promise<PocState> {
+  const { db, client } = resolve(deps);
+  if (!/^https?:\/\/[^\s]+$/.test(sessionUri) || sessionUri.length > 2_000) throw new EmaError("VALIDATION", "session_uri invalide");
+  const row = getComposioConnection(user.id, db);
+  try {
+    const done = await client.completeAuth({ sessionUri, userId: user.id });
+    if (row && row.connected_account_id !== done.connectedAccountId) {
+      log.error("complete_auth returned another account than the user's reference", { userId: user.id });
+      throw new EmaError("FORBIDDEN", "Le compte activé ne correspond pas à la connexion démarrée par cet utilisateur : connexion refusée");
+    }
+    if (!row) upsertComposioConnection({ userId: user.id, connectedAccountId: done.connectedAccountId, authConfigId: getEnv().COMPOSIO_OUTLOOK_AUTH_CONFIG_ID ?? "unknown", status: "INITIATED" }, db);
+    logHistory({ eventType: "composio.identity_verified", message: "Retour OAuth vérifié (Callback Identity Verification)", actor: "user", userId: user.id }, db);
+    log.info("composio callback identity verified", { userId: user.id, connectedAccountId: done.connectedAccountId });
+  } catch (err) {
+    if (err instanceof EmaError && err.code === "FORBIDDEN") {
+      if (row) updateComposioConnection(user.id, { status: "FAILED", statusReason: "Callback identity verification failed", lastError: err.message, checked: true }, db);
+      logHistory({ eventType: "composio.identity_rejected", message: "Retour OAuth refusé : identité différente de l'utilisateur ayant démarré la connexion", actor: "system", userId: user.id }, db);
+      log.warn("composio callback identity rejected", { userId: user.id });
+      throw err;
+    }
+    if (row) updateComposioConnection(user.id, { lastError: err instanceof Error ? err.message : String(err), checked: true }, db);
+    throw err;
+  }
+  return refreshComposioConnection(user, { ...deps, db, client });
 }
 
 /** Relit le statut chez Composio et le mémorise. Vérifie que le compte appartient bien à cet utilisateur. */
@@ -195,7 +268,7 @@ async function loadTools(client: ComposioClient, now: Date): Promise<ComposioToo
 }
 
 /** Tools du toolkit, classés par la politique (diagnostic). */
-export async function listPocTools(deps: PocDeps = {}): Promise<{ allowed: ComposioTool[]; blocked: ComposioTool[] }> {
+export async function listPocTools(deps: PocDeps = {}): Promise<{ allowed: ComposioTool[]; readOnlyUnused: ComposioTool[]; blocked: ComposioTool[] }> {
   const { client, now } = resolve(deps);
   return classifyTools(await loadTools(client, now));
 }
@@ -261,7 +334,7 @@ export async function runPocRead(user: UserRow, operation: ReadOperation, canoni
 
   const tools = await loadTools(client, now);
   const tool = resolveOperation(operation, tools);
-  assertReadOnlySlug(tool.slug, tools); // second rempart, fail-closed
+  assertReadOnlySlug(tool.slug, tools, operation); // second rempart, fail-closed
   const args = shapeArguments(tool, canonical);
   log.info("composio read", { userId: user.id, operation, tool: tool.slug, args: Object.keys(args) });
   const result = await client.execute(tool.slug, { connectedAccountId: row.connected_account_id, userId: user.id, arguments: args });

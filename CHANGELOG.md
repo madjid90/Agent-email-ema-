@@ -4,7 +4,7 @@ Toutes les modifications notables d'EMA sont consignées ici. Format inspiré de
 
 ## [Non publié] — POC Outlook via Composio (lecture seule, branche `poc/composio-outlook`)
 
-Test technique isolé, désactivé par défaut (`COMPOSIO_POC_ENABLED=false` → EMA inchangé). Client REST v3.1 (`src/integrations/composio/client.ts`, SDK écarté : Node ≥ 22.22.3 requis), politique lecture seule fail-closed (`policy.ts`), service par utilisateur (`outlook-poc.ts`), migration `011_composio_poc` (références uniquement, aucun token), routes `/api/poc/composio/*`, page `/poc/composio`, 21 tests mockés. Procédure de smoke test : `docs/composio-poc.md`.
+Test technique isolé, désactivé par défaut (`COMPOSIO_POC_ENABLED=false` → EMA inchangé). Client REST v3.1 (`src/integrations/composio/client.ts`, URL officielle `https://backend.composio.dev`, SDK écarté : Node ≥ 22.22.3 requis), politique lecture seule fail-closed avec **table déterministe de slugs Outlook actuels** (`policy.ts`), service par utilisateur (`outlook-poc.ts`), migration `011_composio_poc` (références uniquement, aucun token), routes `/api/poc/composio/*`, page `/poc/composio`. Corrections d'audit : `input_parameters` v3.1 (mapping direct) + forme JSON Schema, slugs `OUTLOOK_*` actuels (jamais un tool de calendrier pour une pièce jointe de message), **Callback Identity Verification** (`complete_auth`, obligatoire en production, mode callback local toléré en développement seulement), auth config Composio Managed OAuth lecture seule documentée. 29 tests mockés (réponses v3.1). Procédure : `docs/composio-poc.md`.
 
 ## [1.1.0] — Assistant multi-dirigeants : comptes, Outlook par utilisateur, WhatsApp EMA central — 2026-09-18
 

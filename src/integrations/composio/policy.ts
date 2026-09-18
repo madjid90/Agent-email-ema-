@@ -3,9 +3,9 @@ import type { ComposioTool } from "./client";
 
 /**
  * Politique LECTURE SEULE du POC, fail-closed : un tool n'est exécutable que
- * s'il appartient au toolkit Outlook, correspond à une opération autorisée ET
- * ne contient aucun verbe d'écriture. Tout le reste est refusé, y compris un
- * tool inconnu ou ambigu.
+ * s'il appartient au toolkit Outlook, figure dans la table déterministe
+ * ci-dessous pour l'opération demandée, ET ne contient aucun verbe d'écriture.
+ * Tout le reste est refusé, y compris un tool inconnu, ambigu ou déprécié.
  */
 export const POC_TOOLKIT = "outlook";
 
@@ -16,27 +16,41 @@ export type ReadOperation = "list_recent" | "search" | "get_message" | "list_att
 export const WRITE_VERBS = /(SEND|REPLY|FORWARD|DELETE|MOVE|CREATE|UPDATE|MARK|SET_|ADD_|REMOVE|UPLOAD|WRITE|DRAFT|ARCHIVE|TRASH|FLAG|CATEGOR|RULE|SUBSCRI|COPY|BATCH|PATCH|POST|PUT_|IMPORT|RESPOND|ACCEPT|DECLINE|CANCEL|EDIT|MODIFY|CHANGE|CLEAR|PURGE|RESTORE|INVITE|SHARE|GRANT|REVOKE|PUBLISH|COMPOSE|SCHEDULE|SNOOZE|UNSUBSCRIBE|TENTATIVE|REPORT|EMPTY|MANAGE|ASSIGN|APPLY|ENABLE|DISABLE|TRIGGER)/;
 
 /** Verbes de lecture : au moins un est requis. */
-export const READ_VERBS = /(LIST|GET|SEARCH|FETCH|READ|FIND|RETRIEVE|DOWNLOAD|VIEW)/;
+export const READ_VERBS = /(LIST|GET|SEARCH|QUERY|FETCH|READ|FIND|RETRIEVE|DOWNLOAD|VIEW)/;
 
 /**
- * Candidats par opération, par ordre de préférence. Les slugs Outlook n'ont
- * pas pu être vérifiés hors ligne (documentation Composio inaccessible depuis
- * l'environnement de développement) : ils sont RÉSOLUS à l'exécution contre la
- * liste réelle des tools du toolkit, filtrée par la politique. Un candidat
- * absent n'est jamais exécuté « au hasard » : l'opération échoue proprement en
- * indiquant les slugs de lecture réellement disponibles.
+ * Table DÉTERMINISTE et restrictive : slugs exacts du catalogue Outlook Composio
+ * actuel, par ordre de préférence. Aucune expression régulière : une opération
+ * ne peut se résoudre que vers l'un de ces slugs, jamais vers un tool d'un autre
+ * objet métier (ex. `get_attachment` ne résout JAMAIS vers un tool d'événement
+ * de calendrier tel que OUTLOOK_GET_EVENT_ATTACHMENT). Un slug absent du
+ * catalogue réel n'est jamais exécuté : l'opération échoue proprement.
  */
-export const OPERATION_CANDIDATES: Record<ReadOperation, RegExp[]> = {
-  list_recent: [/^OUTLOOK_OUTLOOK_LIST_MESSAGES$/, /^OUTLOOK_LIST_MESSAGES$/, /LIST_MESSAGES$/, /LIST_MAIL/, /GET_MESSAGES$/, /LIST_EMAILS$/],
-  search: [/^OUTLOOK_OUTLOOK_SEARCH_(EMAILS|MESSAGES)$/, /SEARCH_(EMAILS|MESSAGES|MAIL)/, /SEARCH/],
-  get_message: [/^OUTLOOK_OUTLOOK_GET_MESSAGE$/, /GET_MESSAGE$/, /GET_EMAIL$/, /GET_MAIL$/],
-  list_attachments: [/LIST_ATTACHMENTS?$/, /GET_ATTACHMENTS$/, /MESSAGE_ATTACHMENTS/],
-  get_attachment: [/GET_ATTACHMENT$/, /DOWNLOAD_ATTACHMENT/, /ATTACHMENT_CONTENT/],
-  list_events: [/^OUTLOOK_OUTLOOK_CALENDAR_LIST_EVENTS$/, /LIST_EVENTS$/, /CALENDAR_VIEW/, /GET_EVENTS$/, /LIST_CALENDAR_EVENTS/],
-  get_profile: [/^OUTLOOK_OUTLOOK_GET_PROFILE$/, /GET_PROFILE$/, /GET_ME$/, /GET_CURRENT_USER/, /USER_PROFILE/],
+export const OPERATION_TOOLS: Record<ReadOperation, readonly string[]> = {
+  list_recent: ["OUTLOOK_LIST_MESSAGES"],
+  search: ["OUTLOOK_SEARCH_MESSAGES", "OUTLOOK_QUERY_EMAILS"],
+  get_message: ["OUTLOOK_GET_MESSAGE"],
+  list_attachments: ["OUTLOOK_LIST_OUTLOOK_ATTACHMENTS"],
+  get_attachment: ["OUTLOOK_DOWNLOAD_OUTLOOK_ATTACHMENT"],
+  list_events: ["OUTLOOK_LIST_EVENTS"],
+  get_profile: ["OUTLOOK_GET_PROFILE"],
 };
 
-/** `true` si le tool est un tool de LECTURE du toolkit Outlook selon la politique. */
+/** Objet métier attendu par opération : un slug portant un autre objet est refusé même s'il est listé par erreur. */
+const FORBIDDEN_DOMAIN: Record<ReadOperation, RegExp | null> = {
+  list_recent: /EVENT|CALENDAR|CONTACT|FOLDER|ONEDRIVE|FILE/,
+  search: /EVENT|CALENDAR|CONTACT|FOLDER|ONEDRIVE|FILE/,
+  get_message: /EVENT|CALENDAR|CONTACT|FOLDER|ONEDRIVE|FILE/,
+  list_attachments: /EVENT|CALENDAR|ONEDRIVE|FILE/,
+  get_attachment: /EVENT|CALENDAR|ONEDRIVE|FILE/,
+  list_events: /MESSAGE|MAIL|ATTACHMENT|CONTACT|ONEDRIVE|FILE/,
+  get_profile: /MESSAGE|MAIL|EVENT|CALENDAR|ATTACHMENT|FOLDER/,
+};
+
+/** Ensemble plat des slugs autorisés, toutes opérations confondues. */
+export const ALLOWED_SLUGS: ReadonlySet<string> = new Set(Object.values(OPERATION_TOOLS).flat());
+
+/** `true` si le tool est un tool de LECTURE du toolkit Outlook selon la politique (verbes). */
 export function isReadOnlyTool(tool: Pick<ComposioTool, "slug" | "toolkit" | "deprecated">): boolean {
   const slug = tool.slug.toUpperCase();
   if (tool.toolkit.toLowerCase() !== POC_TOOLKIT) return false;
@@ -45,29 +59,49 @@ export function isReadOnlyTool(tool: Pick<ComposioTool, "slug" | "toolkit" | "de
   return READ_VERBS.test(slug);
 }
 
-/** Vérification finale juste avant exécution : lève si le slug n'est pas autorisé. */
-export function assertReadOnlySlug(slug: string, known: Pick<ComposioTool, "slug" | "toolkit" | "deprecated">[]): void {
+/** `true` si le tool est à la fois de lecture ET dans la table déterministe : le seul cas exécutable. */
+export function isExecutableTool(tool: Pick<ComposioTool, "slug" | "toolkit" | "deprecated">): boolean {
+  return isReadOnlyTool(tool) && ALLOWED_SLUGS.has(tool.slug.toUpperCase());
+}
+
+/** Vérification finale juste avant exécution : lève si le slug n'est pas exécutable pour cette opération. */
+export function assertReadOnlySlug(slug: string, known: Pick<ComposioTool, "slug" | "toolkit" | "deprecated">[], operation?: ReadOperation): void {
   const upper = slug.toUpperCase();
   const tool = known.find((t) => t.slug === upper);
   if (!tool) throw new EmaError("FORBIDDEN", `Tool ${upper} inconnu du toolkit ${POC_TOOLKIT} : exécution refusée`);
   if (!isReadOnlyTool(tool)) throw new EmaError("FORBIDDEN", `Tool ${upper} refusé par la politique lecture seule du POC`);
-}
-
-/** Résout l'opération vers le premier slug candidat réellement disponible ET autorisé. */
-export function resolveOperation(op: ReadOperation, tools: ComposioTool[]): ComposioTool {
-  const allowed = tools.filter(isReadOnlyTool);
-  for (const pattern of OPERATION_CANDIDATES[op]) {
-    const match = allowed.find((t) => pattern.test(t.slug));
-    if (match) return match;
+  if (!ALLOWED_SLUGS.has(upper)) throw new EmaError("FORBIDDEN", `Tool ${upper} hors de la table autorisée du POC : exécution refusée`);
+  if (operation) {
+    if (!OPERATION_TOOLS[operation].includes(upper)) throw new EmaError("FORBIDDEN", `Tool ${upper} non autorisé pour l'opération ${operation}`);
+    const forbidden = FORBIDDEN_DOMAIN[operation];
+    if (forbidden && forbidden.test(upper)) throw new EmaError("FORBIDDEN", `Tool ${upper} porte sur un autre objet métier que ${operation} : exécution refusée`);
   }
-  const available = allowed.map((t) => t.slug).sort().join(", ") || "aucun";
-  throw new EmaError("NOT_IMPLEMENTED", `Aucun tool de lecture Composio ne correspond à l'opération « ${op} ». Tools de lecture disponibles : ${available}`);
 }
 
-/** Classement d'une liste de tools pour l'écran de diagnostic. */
-export function classifyTools(tools: ComposioTool[]): { allowed: ComposioTool[]; blocked: ComposioTool[] } {
+/** Résout l'opération vers le premier slug de la table réellement présent dans le catalogue ET autorisé. */
+export function resolveOperation(op: ReadOperation, tools: ComposioTool[]): ComposioTool {
+  const bySlug = new Map(tools.map((t) => [t.slug.toUpperCase(), t]));
+  const forbidden = FORBIDDEN_DOMAIN[op];
+  for (const slug of OPERATION_TOOLS[op]) {
+    const tool = bySlug.get(slug);
+    if (!tool) continue;
+    if (!isReadOnlyTool(tool)) continue;
+    if (forbidden && forbidden.test(slug)) continue;
+    return tool;
+  }
+  const available = tools.filter(isReadOnlyTool).map((t) => t.slug).sort().join(", ") || "aucun";
+  throw new EmaError("NOT_IMPLEMENTED", `Aucun tool autorisé pour l'opération « ${op} » (attendu : ${OPERATION_TOOLS[op].join(" ou ")}). Tools de lecture présents dans le catalogue : ${available}`);
+}
+
+/** Classement d'une liste de tools pour l'écran de diagnostic : exécutables / lecture non retenue / refusés. */
+export function classifyTools(tools: ComposioTool[]): { allowed: ComposioTool[]; readOnlyUnused: ComposioTool[]; blocked: ComposioTool[] } {
   const allowed: ComposioTool[] = [];
+  const readOnlyUnused: ComposioTool[] = [];
   const blocked: ComposioTool[] = [];
-  for (const t of tools) (isReadOnlyTool(t) ? allowed : blocked).push(t);
-  return { allowed, blocked };
+  for (const t of tools) {
+    if (isExecutableTool(t)) allowed.push(t);
+    else if (isReadOnlyTool(t)) readOnlyUnused.push(t);
+    else blocked.push(t);
+  }
+  return { allowed, readOnlyUnused, blocked };
 }

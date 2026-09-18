@@ -9,6 +9,8 @@ export interface PocStateView {
   enabled: boolean;
   configured: boolean;
   configError: string | null;
+  callbackMode: "verified" | "local";
+  callbackWarning: string | null;
   status: "disconnected" | "connecting" | "connected" | "error" | "reconnect_required";
   accountEmail: string | null;
   statusReason: string | null;
@@ -38,7 +40,7 @@ export function ComposioPocPanel({ initial, notice }: { initial: PocStateView; n
   const [messageId, setMessageId] = useState("");
   const [attachmentId, setAttachmentId] = useState("");
   const [output, setOutput] = useState<{ title: string; body: string } | null>(null);
-  const [tools, setTools] = useState<{ allowed: { slug: string; parameters: string[] }[]; blocked: { slug: string }[] } | null>(null);
+  const [tools, setTools] = useState<{ allowed: { slug: string; parameters: string[]; required: string[] }[]; readOnlyUnused: { slug: string }[]; blocked: { slug: string }[] } | null>(null);
 
   async function api<T>(path: string, init?: RequestInit): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
     const res = await fetch(path, init);
@@ -77,7 +79,7 @@ export function ComposioPocPanel({ initial, notice }: { initial: PocStateView; n
 
   async function loadTools() {
     setBusy("tools");
-    const r = await api<{ allowed: { slug: string; parameters: string[] }[]; blocked: { slug: string }[] }>("/api/poc/composio/tools");
+    const r = await api<{ allowed: { slug: string; parameters: string[]; required: string[] }[]; readOnlyUnused: { slug: string }[]; blocked: { slug: string }[] }>("/api/poc/composio/tools");
     setBusy(null);
     if (!r.ok) return setMsg({ tone: "danger", text: r.message });
     setTools(r.data);
@@ -103,6 +105,8 @@ export function ComposioPocPanel({ initial, notice }: { initial: PocStateView; n
     <div className="stack">
       {msg ? <div className={`alert ${msg.tone}`}>{msg.text}</div> : null}
       {!state.configured ? <div className="alert warn">POC non configuré : {state.configError}</div> : null}
+      {state.callbackWarning ? <div className="alert warn">⚠️ {state.callbackWarning}</div> : null}
+      {state.callbackMode === "verified" ? <p className="muted">Retour OAuth protégé par Callback Identity Verification (verifier URL du projet Composio → <code>/api/poc/composio/callback</code>).</p> : null}
       {state.adminApprovalRequired ? <div className="alert danger"><strong>Microsoft administrator approval required.</strong> Le tenant Microsoft exige l&apos;approbation d&apos;un administrateur pour cette application : EMA ne contourne pas cette étape.</div> : null}
       {state.writeScopesDetected.length ? <div className="alert danger">Scopes d&apos;écriture demandés par l&apos;auth config Composio : {state.writeScopesDetected.join(", ")}. Le POC les refuse à l&apos;exécution, mais l&apos;auth config doit être limitée à la lecture (Mail.Read, Calendars.Read, User.Read, offline_access).</div> : null}
 
@@ -162,9 +166,11 @@ export function ComposioPocPanel({ initial, notice }: { initial: PocStateView; n
         ) : null}
         {tools ? (
           <>
-            <h3>Tools autorisés (lecture) — {tools.allowed.length}</h3>
-            <ul>{tools.allowed.map((t) => <li key={t.slug}><code>{t.slug}</code> <span className="muted">({t.parameters.join(", ") || "sans paramètre"})</span></li>)}</ul>
-            <h3>Tools refusés par la politique — {tools.blocked.length}</h3>
+            <h3>Tools exécutables par le POC (table déterministe, lecture) — {tools.allowed.length}</h3>
+            <ul>{tools.allowed.map((t) => <li key={t.slug}><code>{t.slug}</code> <span className="muted">({t.parameters.join(", ") || "sans paramètre"}{t.required.length ? ` — requis : ${t.required.join(", ")}` : ""})</span></li>)}</ul>
+            <h3>Autres tools de lecture du catalogue (non retenus, non exécutables) — {tools.readOnlyUnused.length}</h3>
+            <ul>{tools.readOnlyUnused.map((t) => <li key={t.slug}><code>{t.slug}</code></li>)}</ul>
+            <h3>Tools refusés par la politique (écriture / destructifs) — {tools.blocked.length}</h3>
             <ul>{tools.blocked.map((t) => <li key={t.slug}><code>{t.slug}</code></li>)}</ul>
           </>
         ) : null}

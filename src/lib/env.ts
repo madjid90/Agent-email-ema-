@@ -67,7 +67,14 @@ const envSchema = z.object({
   COMPOSIO_API_KEY: optionalString,
   /** Auth config Outlook créée dans le tableau de bord Composio (sinon : découverte si une seule existe). */
   COMPOSIO_OUTLOOK_AUTH_CONFIG_ID: optionalString,
-  COMPOSIO_BASE_URL: z.string().trim().default("https://api.composio.dev"),
+  COMPOSIO_BASE_URL: z.string().trim().default("https://backend.composio.dev"),
+  /**
+   * Callback Identity Verification (anti session fixation) : `true` = le retour
+   * OAuth passe par le verifier URL du projet Composio et `complete_auth`.
+   * Obligatoire en production (fail-closed) ; le mode callback classique n'est
+   * toléré qu'en développement.
+   */
+  COMPOSIO_CALLBACK_VERIFICATION: optionalBool(false),
   /** `true` uniquement si Nginx réécrit X-Forwarded-For (sinon l'en-tête n'est pas fiable). */
   TRUST_PROXY_HEADER: optionalBool(false),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
