@@ -6,6 +6,7 @@ import {
   buildExternalConnectionUserId,
   canAgentUse,
   requiresHumanApproval,
+  resolveConnectionBackend,
 } from "@/connections";
 
 describe("Agency Connection Core", () => {
@@ -46,6 +47,34 @@ describe("Agency Connection Core", () => {
     const policy = buildComposioSessionPolicy("custom");
     expect(policy.toolkits).toEqual([]);
     expect(canAgentUse("custom", "email.read")).toBe(false);
+  });
+
+  it("reste en backend natif tant que Composio n'est pas explicitement activé", () => {
+    const nativeEnv = {
+      NODE_ENV: "test",
+      ANTHROPIC_MODEL: "claude-opus-5",
+      MICROSOFT_TENANT_ID: "common",
+      WHATSAPP_API_VERSION: "v21.0",
+      WHATSAPP_ASSISTANT_ENABLED: true,
+      WHATSAPP_FOLLOWUP_TEMPLATE_LANG: "fr",
+      APP_URL: "http://localhost:3000",
+      ALLOW_SIGNUP: false,
+      COMPOSIO_ENABLED: false,
+      DATABASE_PATH: "./data/ema.db",
+      PRIVATE_STORAGE_PATH: "./private",
+      CONFIG_PATH: "./config",
+      WORKER_POLL_INTERVAL: 120,
+      EMAIL_SYNC_LIMIT: 50,
+      EMAIL_INITIAL_SYNC_DAYS: 7,
+      ATTACHMENT_MAX_MB: 15,
+      OUTGOING_ATTACHMENT_MAX_MB: 3,
+      PDF_EXTRACTION_TIMEOUT_SECONDS: 20,
+      TRUST_PROXY_HEADER: false,
+      LOG_LEVEL: "info",
+    } as const;
+
+    expect(resolveConnectionBackend(nativeEnv)).toBe("native");
+    expect(resolveConnectionBackend({ ...nativeEnv, COMPOSIO_ENABLED: true, COMPOSIO_API_KEY: "cmp_test" })).toBe("composio");
   });
 
   it("crée une session provider-neutral pour un utilisateur donné", async () => {
