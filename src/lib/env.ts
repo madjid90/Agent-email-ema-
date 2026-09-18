@@ -22,6 +22,10 @@ const envSchema = z.object({
   MICROSOFT_TENANT_ID: z.string().trim().default("common"),
   MICROSOFT_REDIRECT_URI: optionalString,
 
+  /** Connection Hub agence. Optionnel tant que le POC Composio n'est pas activé. */
+  COMPOSIO_API_KEY: optionalString,
+  COMPOSIO_ENABLED: optionalBool(false),
+
   WHATSAPP_ACCESS_TOKEN: optionalString,
   WHATSAPP_PHONE_NUMBER_ID: optionalString,
   WHATSAPP_VERIFY_TOKEN: optionalString,
@@ -121,6 +125,7 @@ export function checkEnv(env: Env = getEnv()): EnvIssue[] {
     warn("WHATSAPP_ACCESS_TOKEN", "WhatsApp non configuré : les validations se font uniquement dans l'interface");
   }
   if (!env.ANTHROPIC_API_KEY) warn("ANTHROPIC_API_KEY", "Analyse Claude indisponible tant que la clé n'est pas renseignée");
+  if (env.COMPOSIO_ENABLED && !env.COMPOSIO_API_KEY) err("COMPOSIO_API_KEY", "Composio est activé mais aucune clé API n'est configurée");
   if (!env.MICROSOFT_CLIENT_ID || !env.MICROSOFT_CLIENT_SECRET) warn("MICROSOFT_CLIENT_ID", "Connexion Outlook impossible tant que l'App Registration n'est pas renseignée");
   else if (!env.MICROSOFT_REDIRECT_URI) warn("MICROSOFT_REDIRECT_URI", "URL de redirection OAuth absente");
   return issues;
@@ -147,6 +152,7 @@ export function getApproverPhone(): string | null {
 export function getConfiguredIntegrations(): {
   anthropic: boolean;
   microsoft: boolean;
+  composio: boolean;
   whatsapp: boolean;
   appSecret: boolean;
   appPassword: boolean;
@@ -155,6 +161,7 @@ export function getConfiguredIntegrations(): {
   return {
     anthropic: Boolean(env.ANTHROPIC_API_KEY),
     microsoft: Boolean(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET && env.MICROSOFT_REDIRECT_URI),
+    composio: Boolean(env.COMPOSIO_ENABLED && env.COMPOSIO_API_KEY),
     whatsapp: Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_VERIFY_TOKEN),
     appSecret: Boolean(env.APP_SECRET && env.APP_SECRET.length >= 32),
     appPassword: Boolean(env.APP_PASSWORD),
